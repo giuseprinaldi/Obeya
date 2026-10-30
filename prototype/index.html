@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Obeya Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: control bar with wall tabs; walls are 3-column grids of panels. Display mode scales one wall to fill a TV.
+   Status is carried by stripes, pills and counts; the accent is reserved for navigation and actions. */
+:root{
+  --bg:#e8ecf0; --surface:#fbfcfd; --surface-2:#f0f3f6; --ink:#16202a; --muted:#566371; --line:#d2d9e1;
+  --accent-l:#2756c9; --accent-d:#7ea2ff; --accent:var(--accent-l); --on-accent:#ffffff;
+  --good:#1d7f52; --warn:#a96e05; --bad:#c13a2a; --good-bg:#dff1e7; --warn-bg:#faeed3; --bad-bg:#f8e0dc;
+  --display:"Barlow Condensed","Arial Narrow",sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  --pad:16px; --gap:14px; --radius:6px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#161d25; --surface-2:#1d2630; --ink:#e5eaf0; --muted:#97a3b1; --line:#2a3541;
+    --accent:var(--accent-d); --on-accent:#0c1320;
+    --good:#4cc38a; --warn:#e5ad3a; --bad:#f06c5b; --good-bg:#15342a; --warn-bg:#382c11; --bad-bg:#3c1c18;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#161d25; --surface-2:#1d2630; --ink:#e5eaf0; --muted:#97a3b1; --line:#2a3541;
+  --accent:var(--accent-d); --on-accent:#0c1320;
+  --good:#4cc38a; --warn:#e5ad3a; --bad:#f06c5b; --good-bg:#15342a; --warn-bg:#382c11; --bad-bg:#3c1c18;
+  color-scheme:dark;
+}
+body.force-light{
+  --bg:#e8ecf0; --surface:#fbfcfd; --surface-2:#f0f3f6; --ink:#16202a; --muted:#566371; --line:#d2d9e1;
+  --accent:var(--accent-l); --on-accent:#ffffff;
+  --good:#1d7f52; --warn:#a96e05; --bad:#c13a2a; --good-bg:#dff1e7; --warn-bg:#faeed3; --bad-bg:#f8e0dc;
+  color-scheme:light;
+}
+body.force-dark{
+  --bg:#0e1319; --surface:#161d25; --surface-2:#1d2630; --ink:#e5eaf0; --muted:#97a3b1; --line:#2a3541;
+  --accent:var(--accent-d); --on-accent:#0c1320;
+  --good:#4cc38a; --warn:#e5ad3a; --bad:#f06c5b; --good-bg:#15342a; --warn-bg:#382c11; --bad-bg:#3c1c18;
+  color-scheme:dark;
+}
+body.compact{ --pad:11px; --gap:10px; }
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 14px/1.45 var(--body);-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3{text-wrap:balance}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* Control bar */
+.bar{position:sticky;top:0;z-index:5;background:var(--surface);border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:10px max(16px,2vw)}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.mark{width:30px;height:30px;border-radius:4px;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;font:700 16px/1 var(--display);flex:none}
+.brand-text{min-width:0}
+.eyebrow{font:500 10.5px/1.2 var(--mono);color:var(--muted);letter-spacing:.09em;text-transform:uppercase}
+.brand h1{margin:0;font:700 21px/1.1 var(--display);letter-spacing:.03em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tabs{display:flex;gap:2px;overflow-x:auto;flex:1 1 300px;min-width:0;scrollbar-width:thin}
+.tab{border:0;background:transparent;color:var(--muted);font:600 15px/1 var(--display);letter-spacing:.05em;text-transform:uppercase;padding:9px 12px;border-radius:4px;white-space:nowrap;cursor:pointer;display:flex;align-items:center;gap:7px;text-decoration:none}
+.tab:hover{color:var(--ink);background:var(--surface-2)}
+.tab[aria-current="page"]{color:var(--ink);background:var(--surface-2);box-shadow:inset 0 -3px 0 var(--accent)}
+.tab .scr{font:500 10.5px var(--mono);color:var(--muted)}
+.flag{font:600 10.5px/1 var(--mono);background:var(--bad);color:#fff;border-radius:9px;padding:3px 6px}
+.bar-actions{display:flex;gap:8px;align-items:center}
+.chip-example{font:500 10.5px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--warn);background:var(--warn-bg);border-radius:3px;padding:3px 6px;white-space:nowrap}
+
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:5px;padding:7px 12px;font-weight:500;font-size:13.5px;cursor:pointer;text-decoration:none;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent);background:transparent}
+.btn.danger[data-armed="1"]{background:var(--bad);color:#fff}
+.btn.small{padding:4px 9px;font-size:12.5px}
+.icon-btn{border:1px solid transparent;background:transparent;color:var(--muted);border-radius:4px;min-width:28px;height:28px;padding:0 6px;cursor:pointer;font-size:13px;display:inline-grid;place-items:center}
+.icon-btn:hover{color:var(--ink);border-color:var(--line);background:var(--surface-2)}
+
+/* Main */
+main{padding:18px max(16px,2vw) 40px}
+.wall-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:10px 16px;margin-bottom:14px}
+.wall-head h2{margin:0;font:700 34px/1 var(--display);text-transform:uppercase;letter-spacing:.02em}
+.wall-head p{margin:4px 0 0;color:var(--muted)}
+.wall-head .screen-tag{font:500 11px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+.wall-actions{display:flex;flex-wrap:wrap;gap:8px}
+
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--gap);align-items:stretch}
+.span-2{grid-column:span 2}
+.span-3{grid-column:1/-1}
+@media (max-width:900px){ .grid{grid-template-columns:minmax(0,1fr)} .span-2,.span-3{grid-column:1/-1} }
+
+.panel{background:var(--surface);border:1px solid var(--line);border-top:3px solid var(--line);border-radius:var(--radius);display:flex;flex-direction:column;min-width:0}
+.panel.st-good{border-top-color:var(--good)} .panel.st-warn{border-top-color:var(--warn)} .panel.st-bad{border-top-color:var(--bad)}
+.panel-head{display:flex;align-items:center;gap:8px;padding:9px var(--pad);border-bottom:1px solid var(--line)}
+.panel-head h3{margin:0;flex:1;min-width:0;font:600 17px/1.15 var(--display);text-transform:uppercase;letter-spacing:.05em}
+.ptype{font:500 10px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.08em;white-space:nowrap}
+.tools{display:flex;gap:1px;opacity:.65}
+.panel:hover .tools,.panel:focus-within .tools{opacity:1}
+.panel-body{padding:var(--pad);flex:1;min-width:0}
+.panel-foot{padding:0 var(--pad) var(--pad)}
+.add{border:1px dashed var(--line);background:transparent;color:var(--muted);border-radius:4px;padding:6px 10px;font-size:12.5px;cursor:pointer;width:100%;text-align:left}
+.add:hover{color:var(--accent);border-color:var(--accent)}
+.empty{color:var(--muted);font-size:13px;margin:0}
+
+/* Status vocabulary */
+.st-good{--st:var(--good);--stbg:var(--good-bg)} .st-warn{--st:var(--warn);--stbg:var(--warn-bg)}
+.st-bad{--st:var(--bad);--stbg:var(--bad-bg)} .st-none{--st:var(--muted);--stbg:var(--surface-2)}
+.pill{display:inline-flex;align-items:center;gap:5px;font:600 11px/1 var(--mono);text-transform:uppercase;letter-spacing:.05em;color:var(--st);background:var(--stbg);border-radius:3px;padding:4px 6px;white-space:nowrap}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--st)}
+
+/* Statement */
+.statement{display:block;width:100%;text-align:left;border:0;background:transparent;padding:0;cursor:pointer}
+.statement q{display:block;quotes:none;font:600 clamp(21px,2.1vw,30px)/1.15 var(--display);letter-spacing:.01em;text-wrap:balance}
+.statement .meta{display:block;margin-top:10px;color:var(--muted);font:500 11.5px var(--mono);text-transform:uppercase;letter-spacing:.06em}
+
+/* KPI */
+.kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:10px}
+.kpi{display:flex;flex-direction:column;gap:2px;text-align:left;border:1px solid var(--line);border-left:4px solid var(--st);border-radius:4px;background:var(--surface-2);padding:9px 11px;cursor:pointer;min-width:0}
+.kpi .name{font-size:12.5px;font-weight:500;color:var(--muted);line-height:1.25}
+.kpi .val{display:flex;align-items:baseline;gap:5px;flex-wrap:wrap}
+.kpi .big{font:600 26px/1.1 var(--mono);font-variant-numeric:tabular-nums;color:var(--ink)}
+.kpi .unit{font-size:12px;color:var(--muted)}
+.kpi .trend{margin-left:auto;font:600 12px var(--mono);color:var(--st)}
+.kpi .tgt{font:500 11px var(--mono);color:var(--muted)}
+.spark{width:100%;height:auto;display:block;margin-top:4px}
+.spark .ln{fill:none;stroke:var(--st);stroke-width:1.8;stroke-linejoin:round;stroke-linecap:round}
+.spark .area{fill:var(--st);opacity:.13}
+.spark .tl{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3;opacity:.7}
+.spark .dot{fill:var(--st)}
+
+/* Flow board */
+.board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(165px,1fr);gap:10px;overflow-x:auto;padding-bottom:4px}
+.col{background:var(--surface-2);border-radius:4px;padding:8px;display:flex;flex-direction:column;gap:6px;min-height:130px;outline:2px solid transparent;outline-offset:-2px}
+.col.over{outline-color:var(--warn)}
+.col.drop{outline:2px dashed var(--accent)}
+.col-head{display:flex;justify-content:space-between;align-items:baseline;gap:6px;font:600 13.5px/1.1 var(--display);text-transform:uppercase;letter-spacing:.05em;padding:2px 2px 4px}
+.col-head .wip{font:500 11px var(--mono);color:var(--muted)}
+.col.over .wip{color:var(--warn);font-weight:600}
+.card{display:block;width:100%;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:7px 8px;cursor:grab;font-size:13px;line-height:1.3}
+.card.blocked{border-left:4px solid var(--bad)}
+.card.dragging{opacity:.4}
+.card .cmeta{display:flex;flex-wrap:wrap;gap:4px 8px;margin-top:5px;font-size:11.5px;color:var(--muted)}
+.tag{font:500 10.5px var(--mono);text-transform:uppercase;letter-spacing:.04em;background:var(--surface-2);border-radius:3px;padding:1px 5px}
+.blk{color:var(--bad);font:600 10.5px var(--mono);text-transform:uppercase}
+.col .add{margin-top:auto;font-size:12px;padding:4px 8px}
+
+/* Rows (actions, problems, portfolio) */
+.rows{display:flex;flex-direction:column}
+.row{display:grid;align-items:center;gap:6px 12px;padding:8px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.row-btn{border:0;background:transparent;padding:0;text-align:left;cursor:pointer;min-width:0}
+.row-btn:hover .rt{color:var(--accent)}
+.rt{font-weight:500;line-height:1.3}
+.rs{font-size:12px;color:var(--muted)}
+.actions .row{grid-template-columns:auto minmax(0,1fr) auto}
+.actions input[type=checkbox]{width:17px;height:17px;accent-color:var(--accent);cursor:pointer}
+.actions .done .rt{text-decoration:line-through;color:var(--muted)}
+.due{font:500 11.5px var(--mono);color:var(--muted);white-space:nowrap}
+.due.late{color:var(--bad);font-weight:600}
+.problems .row{grid-template-columns:4px minmax(0,1fr) auto;align-items:stretch}
+.sev{border-radius:2px;background:var(--st)}
+.stages{display:flex;gap:3px;margin-top:6px}
+.stages i{display:block;width:22px;height:5px;border-radius:2px;background:var(--line)}
+.stages i.on{background:var(--accent)}
+.stage-l{font:500 11px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.04em;align-self:center;white-space:nowrap}
+.portfolio .row{grid-template-columns:minmax(0,1.6fr) auto minmax(90px,1fr) auto}
+.bar-track{height:7px;border-radius:4px;background:var(--surface-2);border:1px solid var(--line);overflow:hidden}
+.bar-fill{height:100%;background:var(--accent)}
+.horizon{font:500 11.5px var(--mono);color:var(--muted);white-space:nowrap}
+@media (max-width:560px){ .portfolio .row{grid-template-columns:minmax(0,1fr) auto} .portfolio .bar-track,.portfolio .horizon{display:none} }
+
+/* Overview */
+.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:22px}
+.stat{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--st);border-radius:var(--radius);padding:11px 13px}
+.stat .n{font:600 30px/1 var(--mono);font-variant-numeric:tabular-nums;color:var(--st)}
+.stat .l{font-size:12.5px;color:var(--muted);margin-top:5px}
+.section-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:0 0 10px}
+.section-h h3{margin:0;font:600 18px var(--display);text-transform:uppercase;letter-spacing:.06em}
+.section-h p{margin:0;color:var(--muted);font-size:12.5px}
+.plan{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.screen{background:#0b0f14;border-radius:8px;padding:8px 8px 0;box-shadow:0 1px 0 var(--line)}
+.screen-inner{min-height:150px;border-radius:3px;background:var(--surface);border-top:3px solid var(--st);padding:12px;display:flex;flex-direction:column;gap:8px;overflow:hidden}
+.screen-label{font:500 10.5px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.screen-name{font:700 22px/1.05 var(--display);text-transform:uppercase;letter-spacing:.02em}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.screen-stand{height:12px;display:flex;justify-content:center}
+.screen-stand span{width:60px;height:6px;background:#0b0f14;border-radius:0 0 4px 4px;margin-top:0}
+.screen-links{display:flex;gap:8px;margin-top:auto}
+.footnote{margin-top:26px;color:var(--muted);font-size:12.5px;max-width:70ch}
+
+/* Dialog */
+dialog{border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);width:min(580px,calc(100vw - 32px));padding:0;max-height:calc(100vh - 40px)}
+dialog::backdrop{background:rgba(8,12,18,.55)}
+.dlg-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--line)}
+.dlg-head h2{margin:0;font:700 22px/1 var(--display);text-transform:uppercase;letter-spacing:.03em}
+.dlg-body{padding:16px 18px;display:grid;gap:12px;max-height:calc(100vh - 200px);overflow:auto}
+.dlg-error{margin:0 18px;color:var(--bad);font-size:13px}
+.dlg-error:empty{display:none}
+.dlg-foot{display:flex;gap:8px;align-items:center;padding:12px 18px;border-top:1px solid var(--line)}
+.spacer{flex:1}
+.field{display:grid;gap:5px}
+.field label,.legend{font-size:12.5px;font-weight:500;color:var(--muted)}
+.field input[type=text],.field input[type=number],.field input[type=date],.field select,.field textarea{width:100%;border:1px solid var(--line);background:var(--surface-2);border-radius:5px;padding:8px 10px}
+.field textarea{resize:vertical;min-height:70px}
+.field .hint{font-size:11.5px;color:var(--muted)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.check{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink)!important}
+.swatches{display:flex;gap:8px;flex-wrap:wrap}
+.swatch{position:relative}
+.swatch input{position:absolute;opacity:0;inset:0}
+.swatch span{display:block;width:34px;height:34px;border-radius:50%;border:3px solid var(--surface);box-shadow:0 0 0 1px var(--line);cursor:pointer}
+.swatch input:checked + span{box-shadow:0 0 0 2px var(--ink)}
+.swatch input:focus-visible + span{outline:2px solid var(--accent);outline-offset:3px}
+.type-pick{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.type-pick label{display:block;border:1px solid var(--line);border-radius:5px;padding:9px 10px;cursor:pointer;color:var(--ink)!important}
+.type-pick input{margin-right:6px;accent-color:var(--accent)}
+.type-pick small{display:block;color:var(--muted);font-weight:400;margin-top:3px}
+.type-pick label:has(input:checked){border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.dlg-section{border-top:1px solid var(--line);padding-top:12px;display:grid;gap:10px}
+.dlg-section h4{margin:0;font:600 15px var(--display);text-transform:uppercase;letter-spacing:.06em}
+.btn-row{display:flex;flex-wrap:wrap;gap:8px}
+
+/* Display mode (TV) */
+#tv{display:none}
+body.tv{overflow:hidden;background:var(--bg)}
+body.tv #app{display:none}
+body.tv #tv{display:block;position:fixed;inset:0;overflow:hidden}
+.tv-stage{position:absolute;top:0;left:0;transform-origin:0 0;display:flex;flex-direction:column;padding:22px 28px 16px;gap:16px}
+.tv-head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;border-bottom:2px solid var(--line);padding-bottom:12px}
+.tv-head .room{font:500 13px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+.tv-head h2{margin:2px 0 0;font:700 52px/1 var(--display);text-transform:uppercase;letter-spacing:.02em}
+.tv-head .sub{color:var(--muted);font-size:16px;margin-top:4px}
+.tv-right{display:flex;align-items:flex-end;gap:22px}
+.tv-clock{text-align:right}
+.tv-clock .t{font:600 40px/1 var(--mono);font-variant-numeric:tabular-nums}
+.tv-clock .d{font:500 13px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-top:4px}
+.tv-head .chips .pill{font-size:13px;padding:6px 8px}
+.tv-grid{flex:1;min-height:0;grid-auto-rows:minmax(0,1fr);pointer-events:none}
+.tv-grid .panel{min-height:0;overflow:hidden}
+.tv-grid .panel-body{overflow:hidden}
+.tv-grid .panel-head h3{font-size:21px}
+.tv-grid .kpis{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
+.tv-grid .kpi .big{font-size:34px}
+.tv-grid .kpi .name{font-size:14px}
+.tv-grid .tools,.tv-grid .add,.tv-grid .ptype{display:none}
+.tv-grid .card,.tv-grid .row-btn,.tv-grid .kpi,.tv-grid .statement{cursor:default}
+.tv-foot{display:flex;justify-content:space-between;font:500 12px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.tv-exit{position:fixed;top:12px;right:12px;z-index:3;opacity:0;transition:opacity .2s}
+body.tv.pointer .tv-exit{opacity:1}
+.tv-progress{position:fixed;left:0;bottom:0;height:3px;background:var(--accent);width:0}
+
+@media (prefers-reduced-motion: reduce){ *{transition:none!important;animation:none!important} }
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="bar">
+    <div class="brand">
+      <div class="mark" aria-hidden="true">大</div>
+      <div class="brand-text">
+        <div class="eyebrow">Obeya</div>
+        <h1 id="roomName">Obeya Room</h1>
+      </div>
+      <span id="exampleChip" class="chip-example" hidden>Example data</span>
+    </div>
+    <nav class="tabs" id="tabs" aria-label="Walls"></nav>
+    <div class="bar-actions">
+      <button class="btn" data-action="customize">Customize</button>
+      <button class="btn primary" data-action="display-current">Display mode</button>
+    </div>
+  </header>
+  <main id="main"></main>
+</div>
+
+<div id="tv" aria-live="off">
+  <div class="tv-stage" id="tvStage"></div>
+  <button class="btn tv-exit" data-action="exit-tv">Exit display</button>
+  <div class="tv-progress" id="tvProgress"></div>
+</div>
+
+<dialog id="dlg" aria-labelledby="dlgTitle">
+  <form id="dlgForm" novalidate>
+    <header class="dlg-head"><h2 id="dlgTitle">Edit</h2><button type="button" class="icon-btn" data-action="dlg-close" aria-label="Close">✕</button></header>
+    <div id="dlgBody" class="dlg-body"></div>
+    <p id="dlgError" class="dlg-error" role="alert"></p>
+    <footer class="dlg-foot">
+      <button type="button" id="dlgDanger" class="btn danger" hidden>Delete</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn ghost" data-action="dlg-close">Cancel</button>
+      <button type="submit" id="dlgSubmit" class="btn primary">Save</button>
+    </footer>
+  </form>
+</dialog>
+
+<script>
+(function(){
+"use strict";
+const STORE_KEY = "obeya-room-v1";
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+const uid = () => Math.random().toString(36).slice(2, 9);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pad2 = n => String(n).padStart(2, "0");
+const iso = dt => `${dt.getFullYear()}-${pad2(dt.getMonth()+1)}-${pad2(dt.getDate())}`;
+const todayISO = () => iso(new Date());
+const dayOffset = n => { const d = new Date(); d.setDate(d.getDate()+n); return iso(d); };
+const fmtDate = s => { if(!s) return ""; const d = new Date(s+"T00:00:00"); return isNaN(d) ? s : d.toLocaleDateString(undefined,{month:"short",day:"numeric"}); };
+const fmtNum = v => { const n = Number(v); if(!isFinite(n)) return "–"; return Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined,{maximumFractionDigits:1}); };
+
+const ACCENTS = {
+  cobalt:{name:"Cobalt", l:"#2756c9", d:"#7ea2ff"},
+  signal:{name:"Signal orange", l:"#c4521a", d:"#ff9a5c"},
+  teal:{name:"Teal", l:"#0d7c7d", d:"#45c6c2"},
+  crimson:{name:"Crimson", l:"#ad2843", d:"#ff7a91"},
+  graphite:{name:"Graphite", l:"#3a4756", d:"#b9c6d4"}
+};
+const STAGES = ["Define","Analyze","Countermeasure","Verify","Closed"];
+const HEALTH = {on:["On track","good"], risk:["At risk","warn"], off:["Off track","bad"]};
+const SEV = {High:"bad", Medium:"warn", Low:"none"};
+
+const TYPES = {
+  statement:{label:"Statement", desc:"True north, goal or focus", item:null},
+  kpi:{label:"KPI tracker", desc:"Actual vs target with trend", item:"KPI", list:"items", fields:[
+    {k:"name", l:"KPI name", t:"text"},
+    {k:"unit", l:"Unit", t:"text", ph:"%, days, / month"},
+    {k:"target", l:"Target", t:"number", half:true},
+    {k:"actual", l:"Current value", t:"number", half:true},
+    {k:"dir", l:"Better when", t:"select", o:[["up","Higher"],["down","Lower"]]},
+    {k:"history", l:"History, oldest first", t:"numlist", hint:"Comma separated. Saving a new current value adds it to the end."}
+  ]},
+  portfolio:{label:"Portfolio", desc:"Initiatives with health and progress", item:"Initiative", list:"items", fields:[
+    {k:"name", l:"Initiative", t:"text"},
+    {k:"owner", l:"Owner", t:"text", half:true},
+    {k:"horizon", l:"Horizon", t:"text", ph:"Q1 2027", half:true},
+    {k:"health", l:"Health", t:"select", o:[["on","On track"],["risk","At risk"],["off","Off track"]], half:true},
+    {k:"progress", l:"Progress %", t:"number", half:true},
+    {k:"note", l:"Note", t:"text"}
+  ]},
+  problems:{label:"Problem solving", desc:"Problems moving through A3 stages", item:"Problem", list:"items", fields:[
+    {k:"title", l:"Problem", t:"text"},
+    {k:"owner", l:"Owner", t:"text", half:true},
+    {k:"severity", l:"Severity", t:"select", o:[["High","High"],["Medium","Medium"],["Low","Low"]], half:true},
+    {k:"stage", l:"Stage", t:"select", o:STAGES.map(s=>[s,s])},
+    {k:"problem", l:"What is happening", t:"textarea"},
+    {k:"cause", l:"Root cause", t:"textarea"},
+    {k:"countermeasure", l:"Countermeasure", t:"textarea"}
+  ]},
+  actions:{label:"Action tracker", desc:"Owners, due dates, done", item:"Action", list:"items", fields:[
+    {k:"text", l:"Action", t:"text"},
+    {k:"owner", l:"Owner", t:"text", half:true},
+    {k:"due", l:"Due", t:"date", half:true},
+    {k:"done", l:"Done", t:"checkbox"}
+  ]},
+  kanban:{label:"Flow board", desc:"Columns with WIP limits", item:"Card", list:"cards", fields:[
+    {k:"title", l:"Card", t:"text"},
+    {k:"owner", l:"Owner", t:"text", half:true},
+    {k:"tag", l:"Tag", t:"text", half:true},
+    {k:"col", l:"Column", t:"column"},
+    {k:"blocked", l:"Blocked", t:"checkbox"}
+  ]}
+};
+
+/* ---------- Seed content (clearly marked as example data) ---------- */
+const P = {
+  statement:(title,text,meta,span=1)=>({id:uid(),type:"statement",title,span,data:{text,meta}}),
+  kpi:(title,rows,span=3)=>({id:uid(),type:"kpi",title,span,data:{items:rows.map(([name,unit,target,actual,dir,history])=>({id:uid(),name,unit,target,actual,dir,history}))}}),
+  portfolio:(title,rows,span=3)=>({id:uid(),type:"portfolio",title,span,data:{items:rows.map(([name,owner,health,progress,horizon,note])=>({id:uid(),name,owner,health,progress,horizon,note}))}}),
+  problems:(title,rows,span=2)=>({id:uid(),type:"problems",title,span,data:{items:rows.map(([title,owner,severity,stage,problem,cause,countermeasure])=>({id:uid(),title,owner,severity,stage,problem,cause,countermeasure}))}}),
+  actions:(title,rows,span=1)=>({id:uid(),type:"actions",title,span,data:{items:rows.map(([text,owner,off,done])=>({id:uid(),text,owner,due:dayOffset(off),done}))}}),
+  kanban:(title,cols,cards,span=3)=>{ const columns=cols.map(([name,wip])=>({id:uid(),name,wip})); return {id:uid(),type:"kanban",title,span,data:{columns,cards:cards.map(([title,ci,owner,tag,blocked])=>({id:uid(),title,col:columns[ci].id,owner,tag,blocked:!!blocked}))}}; }
+};
+
+const LIBRARY = {
+  direction:{name:"Direction", build:()=>({name:"Direction", subtitle:"Why we exist and where we are heading", panels:[
+    P.statement("True north","Every architecture decision is visible, traceable and made at the speed the mission needs.","Owner: leadership team · Reviewed quarterly",2),
+    P.statement("Focus this quarter","Two delivery teams use the proposal pipeline every sprint.","Checked at the monthly ops review",1),
+    P.portfolio("Strategic portfolio",[
+      ["Feature proposal pipeline","Program lead","risk",45,"Q4 2026","Hosting and sign-in still open"],
+      ["Data platform modernization","Data lead","on",70,"Q1 2027","Models in review"],
+      ["Architecture decision records","Chief architect","on",85,"Q4 2026","Template adopted by 3 teams"],
+      ["Toolchain security review","Security liaison","off",20,"Q4 2026","Waiting on exception decision"],
+      ["Team onboarding playbook","Scrum master","on",55,"Q1 2027",""]
+    ],3)
+  ]})},
+  performance:{name:"Performance", build:()=>({name:"Performance", subtitle:"Are we getting better? Targets, actuals and trend", panels:[
+    P.kpi("Delivery and flow",[
+      ["Lead time for change","days",5,7.5,"down",[12,11,10,9.5,8,7.5]],
+      ["Deploys per week","",10,9,"up",[4,5,6,7,8,9]],
+      ["Change failure rate","%",10,14,"down",[18,17,15,16,15,14]],
+      ["Proposals reviewed","/ month",12,13,"up",[5,7,8,10,11,13]],
+      ["Review turnaround","days",3,2.5,"down",[6,5,4.5,4,3,2.5]],
+      ["Stakeholder satisfaction","/ 5",4.2,3.9,"up",[3.4,3.5,3.7,3.6,3.8,3.9]]
+    ],3)
+  ]})},
+  delivery:{name:"Delivery", build:()=>({name:"Delivery", subtitle:"Current sprint flow across the program", panels:[
+    P.statement("Sprint goal","Pilot users submit a proposal and get an AI review back in under ten minutes.","Sprint 14 · Demo Friday",1),
+    P.kpi("Sprint health",[
+      ["Scope done","%",100,62,"up",[0,10,22,35,48,62]],
+      ["Blocked days","",0,3,"down",[0,1,1,2,3,3]],
+      ["Unplanned work","%",15,12,"down",[5,8,9,10,12,12]]
+    ],2),
+    P.kanban("Program flow",[["Backlog",0],["Ready",0],["In progress",3],["Review",2],["Done",0]],[
+      ["Audit log",0,"","Backend"],["Upload error states",0,"","Frontend"],
+      ["Approval gate UI",1,"Tom","Frontend"],["Jira epic preview",1,"Marcus","Integration"],
+      ["Template reformatter",2,"Marcus","AI"],["AI review prompt v2",2,"Joe","AI"],["Proposal schema",2,"Dana","Backend"],["Sign-in spike",2,"Dana","Infra",true],
+      ["Proposal upload form",3,"Priya","Frontend"],["Review result view",3,"Priya","Frontend"],
+      ["Repo scaffold",4,"Joe","Infra"],["CI pipeline",4,"Dana","Infra"]
+    ],3)
+  ]})},
+  teamhealth:{name:"Team health", build:()=>({name:"Team health", subtitle:"How the team is working, not just what it ships", panels:[
+    P.statement("Working agreements","Pull before you push. Raise blockers within a day. Finish reviews before starting new work.","Revisited every retro",1),
+    P.kpi("Team signals",[
+      ["Velocity","pts",40,36,"up",[30,33,35,38,34,36]],
+      ["Say / do ratio","%",85,78,"up",[70,72,80,76,79,78]],
+      ["Cycle time","days",4,4.5,"down",[7,6.5,6,5,5.2,4.5]],
+      ["Team morale","/ 5",4,4.1,"up",[3.6,3.8,3.7,3.9,4,4.1]]
+    ],2)
+  ]})},
+  problems:{name:"Problems & actions", build:()=>({name:"Problems & actions", subtitle:"What is in the way, and who is moving it", panels:[
+    P.problems("Problems and impediments",[
+      ["Hosting VM cannot reach the AI service","Infra lead","High","Analyze","Requests from the VM time out after 30 seconds.","Outbound proxy rule not confirmed.","Request the firewall change, then retest from the VM."],
+      ["Reviews pile up at sprint end","Chief architect","Medium","Countermeasure","Most reviews land in the last two days of the sprint.","Work is batched into review late.","WIP limit of 2 in Review and a daily review slot."],
+      ["Proposal template drift","Scrum master","Low","Verify","Teams submit older template versions.","The template lives in several places.","One template link inside the intake form."],
+      ["No owner for ticket planning stage","Program lead","Medium","Define","Epic and story creation has no stage owner.","",""]
+    ],2),
+    P.actions("Actions",[
+      ["Confirm outbound access from the VM","Infra lead",-2,false],
+      ["Book demo slot with pilot teams","Scrum master",1,false],
+      ["Draft ADR for review storage","Chief architect",3,false],
+      ["Assign owner for ticket planning","Program lead",2,false],
+      ["Retro on review countermeasure","Scrum master",7,false],
+      ["Publish template link in intake form","Scrum master",-5,true]
+    ],1)
+  ]})}
+};
+const TEMPLATES = {
+  program:{name:"Program room", desc:"Leadership and program management", walls:["direction","performance","delivery","problems"]},
+  leadership:{name:"Leadership room", desc:"Strategy, KPIs, problems, actions", walls:["direction","performance","problems"]},
+  team:{name:"Team delivery", desc:"Sprint flow and team health", walls:["delivery","teamhealth","problems"]}
+};
+function buildWall(key){ const w = LIBRARY[key].build(); return {id:key+"-"+uid().slice(0,4), ...w}; }
+function seed(tpl="program"){
+  return {v:1, roomName:"Program Obeya", theme:"auto", tvTheme:"dark", accent:"cobalt", density:"comfortable", rotate:0, example:true,
+    updated:new Date().toISOString(), walls:TEMPLATES[tpl].walls.map(buildWall)};
+}
+
+/* ---------- State ---------- */
+let state, storageOK = true;
+const valid = s => s && typeof s === "object" && Array.isArray(s.walls) && s.walls.every(w => w && w.id && Array.isArray(w.panels));
+function load(){
+  try{ const raw = localStorage.getItem(STORE_KEY); if(raw){ const s = JSON.parse(raw); if(valid(s)) return s; } }
+  catch(e){ storageOK = false; }
+  return seed();
+}
+function save(){
+  state.updated = new Date().toISOString();
+  try{ localStorage.setItem(STORE_KEY, JSON.stringify(state)); storageOK = true; } catch(e){ storageOK = false; }
+}
+function commit(){ state.example = false; save(); route(); }
+state = load();
+
+const wallById = id => state.walls.find(w => w.id === id);
+function findPanel(pid){ for(const w of state.walls){ const p = w.panels.find(x => x.id === pid); if(p) return {w,p}; } return {}; }
+const itemsOf = p => p.type === "kanban" ? p.data.cards : (p.data.items || []);
+
+/* ---------- Status logic ---------- */
+function kpiStatus(k){
+  const a = Number(k.actual), t = Number(k.target);
+  if(k.actual === "" || k.actual == null || !isFinite(a) || !isFinite(t)) return "none";
+  if(k.dir === "down"){ if(a <= t) return "good"; return (t === 0 ? a <= 1 : a <= t*1.1) ? "warn" : "bad"; }
+  if(a >= t) return "good"; return a >= t*0.9 ? "warn" : "bad";
+}
+const isLate = a => !a.done && a.due && a.due < todayISO();
+function signals(panels){
+  const s = {kpiBad:0,kpiWarn:0,blocked:0,overWip:0,late:0,openHigh:0,open:0,off:0,risk:0,items:0};
+  for(const p of panels){
+    const d = p.data;
+    if(p.type === "kpi") d.items.forEach(k => { s.items++; const st = kpiStatus(k); if(st==="bad") s.kpiBad++; else if(st==="warn") s.kpiWarn++; });
+    if(p.type === "kanban"){
+      const last = d.columns.length ? d.columns[d.columns.length-1].id : null;
+      d.cards.forEach(c => { s.items++; if(c.blocked && c.col !== last) s.blocked++; });
+      d.columns.forEach(c => { if(Number(c.wip) > 0 && d.cards.filter(x => x.col === c.id).length > Number(c.wip)) s.overWip++; });
+    }
+    if(p.type === "actions") d.items.forEach(a => { s.items++; if(isLate(a)) s.late++; });
+    if(p.type === "problems") d.items.forEach(x => { s.items++; if(x.stage !== "Closed"){ s.open++; if(x.severity === "High") s.openHigh++; } });
+    if(p.type === "portfolio") d.items.forEach(x => { s.items++; if(x.health === "off") s.off++; else if(x.health === "risk") s.risk++; });
+  }
+  return s;
+}
+const badCount = s => s.kpiBad + s.blocked + s.late + s.openHigh + s.off;
+function panelStatus(p){
+  if(p.type === "statement") return "none";
+  const s = signals([p]);
+  if(badCount(s)) return "bad";
+  if(s.kpiWarn + s.overWip + s.risk + s.open) return "warn";
+  return s.items ? "good" : "none";
+}
+function chips(s){
+  const out = [];
+  const add = (n, label, st) => { if(n) out.push(`<span class="pill st-${st}">${n} ${label}</span>`); };
+  add(s.kpiBad, s.kpiBad>1?"KPIs off target":"KPI off target", "bad");
+  add(s.off, "off track", "bad");
+  add(s.blocked, "blocked", "bad");
+  add(s.late, "late", "bad");
+  add(s.openHigh, "high severity", "bad");
+  add(s.kpiWarn, "near target", "warn");
+  add(s.risk, "at risk", "warn");
+  add(s.overWip, "over WIP", "warn");
+  if(!out.length) out.push(`<span class="pill st-good">All clear</span>`);
+  return out.join("");
+}
+
+/* ---------- Rendering: panels ---------- */
+function spark(hist, target){
+  const h = (Array.isArray(hist) ? hist : []).map(Number).filter(isFinite).slice(-12);
+  if(h.length < 2) return "";
+  const W = 180, H = 38, p = 3, t = Number(target);
+  const vals = isFinite(t) ? h.concat([t]) : h;
+  let mn = Math.min(...vals), mx = Math.max(...vals); if(mn === mx){ mn -= 1; mx += 1; }
+  const x = i => p + i*(W-2*p)/(h.length-1), y = v => H-p - (v-mn)*(H-2*p)/(mx-mn);
+  const pts = h.map((v,i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+  const area = `M${x(0).toFixed(1)},${H-p} L${pts.join(" L")} L${x(h.length-1).toFixed(1)},${H-p} Z`;
+  const tl = isFinite(t) ? `<line class="tl" x1="${p}" x2="${W-p}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}"/>` : "";
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" aria-hidden="true">${tl}<path class="area" d="${area}"/><polyline class="ln" points="${pts.join(" ")}"/><circle class="dot" cx="${x(h.length-1).toFixed(1)}" cy="${y(h[h.length-1]).toFixed(1)}" r="3"/></svg>`;
+}
+function trend(k){
+  const h = (k.history||[]).map(Number).filter(isFinite);
+  if(h.length < 2) return "";
+  const diff = h[h.length-1] - h[h.length-2];
+  if(Math.abs(diff) < 1e-9) return "→";
+  return diff > 0 ? "▲" : "▼";
+}
+const RENDER = {
+  statement:p => `<button class="statement" data-action="panel-settings" data-panel="${p.id}" aria-label="Edit ${esc(p.title)}"><q>${esc(p.data.text)}</q>${p.data.meta?`<span class="meta">${esc(p.data.meta)}</span>`:""}</button>`,
+  kpi:p => p.data.items.length ? `<div class="kpis">${p.data.items.map(k => { const st = kpiStatus(k); return `
+    <button class="kpi st-${st}" data-action="edit-item" data-panel="${p.id}" data-item="${k.id}">
+      <span class="name">${esc(k.name)}</span>
+      <span class="val"><span class="big">${fmtNum(k.actual)}</span><span class="unit">${esc(k.unit)}</span><span class="trend">${trend(k)}</span></span>
+      <span class="tgt">Target ${k.dir==="down"?"≤":"≥"} ${fmtNum(k.target)} ${esc(k.unit)}</span>
+      ${spark(k.history, k.target)}
+    </button>`; }).join("")}</div>` : `<p class="empty">No KPIs yet. Add one to start tracking against a target.</p>`,
+  portfolio:p => p.data.items.length ? `<div class="rows portfolio">${p.data.items.map(x => { const [hl, hs] = HEALTH[x.health] || HEALTH.on; const pr = Math.max(0, Math.min(100, Number(x.progress)||0)); return `
+    <div class="row">
+      <button class="row-btn" data-action="edit-item" data-panel="${p.id}" data-item="${x.id}"><div class="rt">${esc(x.name)}</div><div class="rs">${esc([x.owner, x.note].filter(Boolean).join(" · "))}</div></button>
+      <span class="pill st-${hs}">${hl}</span>
+      <div class="bar-track" title="${pr}% complete"><div class="bar-fill" style="width:${pr}%"></div></div>
+      <span class="horizon">${pr}% · ${esc(x.horizon)}</span>
+    </div>`; }).join("")}</div>` : `<p class="empty">No initiatives yet.</p>`,
+  problems:p => p.data.items.length ? `<div class="rows problems">${p.data.items.slice().sort((a,b) => (a.stage==="Closed")-(b.stage==="Closed") || ["High","Medium","Low"].indexOf(a.severity)-["High","Medium","Low"].indexOf(b.severity)).map(x => { const si = Math.max(0, STAGES.indexOf(x.stage)); return `
+    <div class="row st-${SEV[x.severity]||"none"}">
+      <span class="sev" aria-label="${esc(x.severity)} severity"></span>
+      <button class="row-btn" data-action="edit-item" data-panel="${p.id}" data-item="${x.id}">
+        <div class="rt">${esc(x.title)}</div>
+        <div class="rs">${esc([x.severity, x.owner].filter(Boolean).join(" · "))}${x.countermeasure?` · Next: ${esc(x.countermeasure)}`:""}</div>
+        <div class="stages" aria-hidden="true">${STAGES.map((s,i) => `<i class="${i<=si?"on":""}"></i>`).join("")}</div>
+      </button>
+      <span class="stage-l">${esc(x.stage)}</span>
+    </div>`; }).join("")}</div>` : `<p class="empty">No open problems. Add one when something blocks the plan.</p>`,
+  actions:p => p.data.items.length ? `<div class="rows actions">${p.data.items.slice().sort((a,b) => (a.done-b.done) || String(a.due).localeCompare(String(b.due))).map(a => { const late = isLate(a), today = a.due === todayISO(); return `
+    <div class="row ${a.done?"done":""}">
+      <input type="checkbox" data-action="toggle-done" data-panel="${p.id}" data-item="${a.id}" ${a.done?"checked":""} aria-label="Mark ${esc(a.text)} done">
+      <button class="row-btn" data-action="edit-item" data-panel="${p.id}" data-item="${a.id}"><div class="rt">${esc(a.text)}</div><div class="rs">${esc(a.owner)}</div></button>
+      <span class="due ${late?"late":""}">${a.done?"Done":late?"Late · "+fmtDate(a.due):today?"Today":fmtDate(a.due)}</span>
+    </div>`; }).join("")}</div>` : `<p class="empty">No actions yet.</p>`,
+  kanban:p => `<div class="board">${p.data.columns.map(c => { const cards = p.data.cards.filter(x => x.col === c.id); const over = Number(c.wip) > 0 && cards.length > Number(c.wip); return `
+    <div class="col ${over?"over":""}" data-col="${c.id}" data-panel="${p.id}">
+      <div class="col-head"><span>${esc(c.name)}</span><span class="wip">${cards.length}${Number(c.wip)>0?" / "+c.wip:""}${over?" over":""}</span></div>
+      ${cards.map(x => `<button class="card ${x.blocked?"blocked":""}" draggable="true" data-action="edit-item" data-panel="${p.id}" data-item="${x.id}">
+        ${esc(x.title)}
+        <span class="cmeta">${x.owner?`<span>${esc(x.owner)}</span>`:""}${x.tag?`<span class="tag">${esc(x.tag)}</span>`:""}${x.blocked?`<span class="blk">Blocked</span>`:""}</span>
+      </button>`).join("")}
+      <button class="add" data-action="add-item" data-panel="${p.id}" data-col="${c.id}">+ Card</button>
+    </div>`; }).join("")}</div>`
+};
+function renderPanel(p, w, tv){
+  const T = TYPES[p.type]; const st = panelStatus(p);
+  const i = w.panels.indexOf(p);
+  const tools = tv ? "" : `<div class="tools">
+      <button class="icon-btn" data-action="move-panel" data-dir="-1" data-panel="${p.id}" aria-label="Move ${esc(p.title)} earlier" ${i===0?"disabled":""}>←</button>
+      <button class="icon-btn" data-action="move-panel" data-dir="1" data-panel="${p.id}" aria-label="Move ${esc(p.title)} later" ${i===w.panels.length-1?"disabled":""}>→</button>
+      <button class="icon-btn" data-action="panel-settings" data-panel="${p.id}" aria-label="Edit panel ${esc(p.title)}">Edit</button>
+    </div>`;
+  const foot = (!tv && T.item && p.type !== "kanban") ? `<div class="panel-foot"><button class="add" data-action="add-item" data-panel="${p.id}">+ Add ${T.item.toLowerCase()}</button></div>` : "";
+  return `<section class="panel span-${p.span||1} st-${st}" data-panel="${p.id}">
+    <header class="panel-head"><h3>${esc(p.title)}</h3><span class="ptype">${T.label}</span>${tools}</header>
+    <div class="panel-body">${RENDER[p.type](p)}</div>${foot}
+  </section>`;
+}
+
+/* ---------- Rendering: views ---------- */
+function renderTabs(active){
+  const tabs = [`<a class="tab" href="#overview" ${active==="overview"?'aria-current="page"':""}>Overview</a>`];
+  state.walls.forEach((w, i) => {
+    const n = badCount(signals(w.panels));
+    tabs.push(`<a class="tab" href="#wall-${w.id}" ${active===w.id?'aria-current="page"':""}><span class="scr">${i+1}</span>${esc(w.name)}${n?`<span class="flag" aria-label="${n} items need attention">${n}</span>`:""}</a>`);
+  });
+  tabs.push(`<button class="tab" data-action="add-wall" aria-label="Add a wall">+ Wall</button>`);
+  $("#tabs").innerHTML = tabs.join("");
+  $("#roomName").textContent = state.roomName || "Obeya Room";
+  $("#exampleChip").hidden = !state.example;
+}
+function renderOverview(){
+  const all = signals(state.walls.flatMap(w => w.panels));
+  const stat = (n, label, st) => `<div class="stat st-${n?st:"good"}"><div class="n">${n}</div><div class="l">${label}</div></div>`;
+  const when = new Date(state.updated);
+  return `
+    <div class="wall-head">
+      <div><div class="screen-tag">Room overview</div><h2>${esc(state.roomName)}</h2><p>${state.walls.length} walls · updated ${isNaN(when)?"":when.toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</p></div>
+      <div class="wall-actions"><button class="btn" data-action="add-wall">+ Add wall</button><button class="btn primary" data-action="open-tv" data-wall="${state.walls[0]?.id||""}">Start display</button></div>
+    </div>
+    <div class="summary">
+      ${stat(all.kpiBad,"KPIs off target","bad")}
+      ${stat(all.off + all.risk,"Initiatives off track or at risk", all.off?"bad":"warn")}
+      ${stat(all.blocked,"Blocked work items","bad")}
+      ${stat(all.openHigh,"High-severity problems open","bad")}
+      ${stat(all.late,"Late actions","bad")}
+    </div>
+    <div class="section-h"><h3>Room plan</h3><p>Each wall runs on its own screen. Open a display on the TV it belongs to.</p></div>
+    <div class="plan">${state.walls.length ? state.walls.map((w, i) => { const s = signals(w.panels); const st = badCount(s) ? "bad" : (s.kpiWarn+s.risk+s.overWip ? "warn" : "good"); return `
+      <div><div class="screen"><div class="screen-inner st-${st}">
+        <div class="screen-label">Screen ${i+1} · ${w.panels.length} panels</div>
+        <div class="screen-name">${esc(w.name)}</div>
+        <div class="chips">${chips(s)}</div>
+        <div class="screen-links"><a class="btn small" href="#wall-${w.id}">Edit wall</a><a class="btn small primary" href="#tv-${w.id}">Open display</a></div>
+      </div></div><div class="screen-stand"><span></span></div></div>`; }).join("") : `<p class="empty">No walls yet. Add one, or load a room template from Customize.</p>`}</div>
+    <p class="footnote">Prototype: changes are saved in this browser only, and display tabs open in this browser update live as you edit. On real TVs each screen will read from the shared server instead. Customize has a JSON backup for moving data between browsers.${storageOK?"":" <strong>This browser is blocking storage, so changes will be lost on reload.</strong>"}</p>`;
+}
+function renderWall(w){
+  const i = state.walls.indexOf(w);
+  return `
+    <div class="wall-head">
+      <div><div class="screen-tag">Screen ${i+1} of ${state.walls.length}</div><h2>${esc(w.name)}</h2>${w.subtitle?`<p>${esc(w.subtitle)}</p>`:""}</div>
+      <div class="wall-actions">
+        <button class="btn" data-action="add-panel" data-wall="${w.id}">+ Add panel</button>
+        <button class="btn" data-action="wall-settings" data-wall="${w.id}">Wall settings</button>
+        <a class="btn primary" href="#tv-${w.id}">Open display</a>
+      </div>
+    </div>
+    <div class="grid">${w.panels.map(p => renderPanel(p, w, false)).join("") || `<p class="empty">This wall is empty. Add a panel to start.</p>`}</div>`;
+}
+
+/* ---------- Display mode ---------- */
+let tvTimer = null, tvRotate = null, pointerTimer = null, tvWallId = null;
+function applyTvScale(){
+  const stage = $("#tvStage"); if(!stage) return;
+  const W0 = 1600, vw = window.innerWidth, vh = window.innerHeight, s = vw / W0;
+  stage.style.width = W0 + "px"; stage.style.height = (vh / s) + "px"; stage.style.transform = `scale(${s})`;
+}
+function renderTv(w){
+  const i = state.walls.indexOf(w), s = signals(w.panels);
+  const now = new Date();
+  $("#tvStage").innerHTML = `
+    <div class="tv-head">
+      <div><div class="room">${esc(state.roomName)} · Screen ${i+1}</div><h2>${esc(w.name)}</h2>${w.subtitle?`<div class="sub">${esc(w.subtitle)}</div>`:""}</div>
+      <div class="tv-right"><div class="chips">${chips(s)}</div>
+        <div class="tv-clock"><div class="t" id="tvTime">${now.toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"})}</div><div class="d">${now.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"})}</div></div>
+      </div>
+    </div>
+    <div class="grid tv-grid">${w.panels.map(p => renderPanel(p, w, true)).join("")}</div>
+    <div class="tv-foot"><span>Updated ${new Date(state.updated).toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</span><span>${[state.rotate?`Rotating every ${state.rotate}s`:"", state.example?"Example data":""].filter(Boolean).join(" · ")}</span></div>`;
+  applyTvScale();
+}
+function startTv(id){
+  const w = wallById(id) || state.walls[0];
+  if(!w){ location.hash = "#overview"; return; }
+  tvWallId = w.id;
+  document.body.classList.add("tv");
+  applyPrefs(true);
+  renderTv(w);
+  clearInterval(tvTimer);
+  tvTimer = setInterval(() => { const t = $("#tvTime"); if(t) t.textContent = new Date().toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"}); }, 15000);
+  clearTimeout(tvRotate);
+  const bar = $("#tvProgress"); bar.style.transition = "none"; bar.style.width = "0";
+  if(Number(state.rotate) > 0 && state.walls.length > 1){
+    requestAnimationFrame(() => { bar.style.transition = `width ${state.rotate}s linear`; bar.style.width = "100%"; });
+    tvRotate = setTimeout(() => { const n = state.walls[(state.walls.indexOf(w)+1) % state.walls.length]; location.hash = "#tv-" + n.id; }, state.rotate * 1000);
+  }
+}
+function stopTv(){
+  clearInterval(tvTimer); clearTimeout(tvRotate); tvWallId = null;
+  document.body.classList.remove("tv", "pointer");
+}
+
+/* ---------- Router ---------- */
+function applyPrefs(tv){
+  const a = ACCENTS[state.accent] || ACCENTS.cobalt;
+  const r = document.documentElement.style; r.setProperty("--accent-l", a.l); r.setProperty("--accent-d", a.d);
+  const theme = tv ? state.tvTheme : state.theme;
+  document.body.classList.toggle("force-light", theme === "light");
+  document.body.classList.toggle("force-dark", theme === "dark");
+  document.body.classList.toggle("compact", state.density === "compact");
+}
+function route(){
+  const h = location.hash.replace(/^#/, "");
+  if(h.startsWith("tv-")){ startTv(h.slice(3)); return; }
+  if(document.body.classList.contains("tv")) stopTv();
+  applyPrefs(false);
+  let active = "overview";
+  if(h.startsWith("wall-") && wallById(h.slice(5))) active = h.slice(5);
+  renderTabs(active);
+  $("#main").innerHTML = active === "overview" ? renderOverview() : renderWall(wallById(active));
+  bindDnD();
+}
+window.addEventListener("hashchange", route);
+window.addEventListener("resize", applyTvScale);
+window.addEventListener("storage", e => {
+  if(e.key !== STORE_KEY || !e.newValue) return;
+  try{ const s = JSON.parse(e.newValue); if(valid(s)){ state = s; if(!$("#dlg").open) route(); } }catch(err){}
+});
+
+/* ---------- Dialog ---------- */
+const dlg = $("#dlg"); let dlgH = {};
+function openDialog({title, body, submit="Save", onSubmit, danger}){
+  if(dlg.open) dlg.close();
+  $("#dlgTitle").textContent = title;
+  $("#dlgBody").innerHTML = body;
+  $("#dlgError").textContent = "";
+  const sb = $("#dlgSubmit"); sb.textContent = submit; sb.hidden = !onSubmit;
+  const dz = $("#dlgDanger"); dz.hidden = !danger; dz.dataset.armed = "";
+  if(danger) dz.textContent = danger.label;
+  dlgH = {onSubmit, danger};
+  if(typeof dlg.showModal === "function") dlg.showModal(); else dlg.setAttribute("open", "");
+  const f = $("#dlgBody input:not([type=checkbox]):not([type=radio]), #dlgBody textarea, #dlgBody select"); if(f) f.focus();
+}
+const closeDialog = () => { if(dlg.open) dlg.close(); };
+const dlgErr = m => { $("#dlgError").textContent = m; return false; };
+$("#dlgForm").addEventListener("submit", e => {
+  e.preventDefault();
+  if(dlgH.onSubmit && dlgH.onSubmit() !== false){ closeDialog(); }
+});
+$("#dlgDanger").addEventListener("click", e => {
+  const b = e.currentTarget;
+  if(b.dataset.armed !== "1"){ b.dataset.armed = "1"; b.textContent = "Click again to confirm"; return; }
+  dlgH.danger.onConfirm(); closeDialog();
+});
+const v = id => { const el = document.getElementById(id); return el ? el.value : ""; };
+
+function fieldHTML(f, val, p){
+  const id = "f_" + f.k, lab = `<label for="${id}">${esc(f.l)}</label>`, hint = f.hint ? `<span class="hint">${esc(f.hint)}</span>` : "";
+  switch(f.t){
+    case "textarea": return `${lab}<textarea id="${id}" rows="3">${esc(val)}</textarea>${hint}`;
+    case "select": return `${lab}<select id="${id}">${f.o.map(([k,l]) => `<option value="${esc(k)}" ${String(val)===k?"selected":""}>${esc(l)}</option>`).join("")}</select>`;
+    case "column": return `${lab}<select id="${id}">${p.data.columns.map(c => `<option value="${c.id}" ${val===c.id?"selected":""}>${esc(c.name)}</option>`).join("")}</select>`;
+    case "checkbox": return `<label class="check" for="${id}"><input type="checkbox" id="${id}" ${val?"checked":""}> ${esc(f.l)}</label>`;
+    case "numlist": return `${lab}<input type="text" id="${id}" value="${esc((val||[]).join(", "))}" inputmode="decimal">${hint}`;
+    case "number": return `${lab}<input type="number" step="any" id="${id}" value="${esc(val)}">${hint}`;
+    case "date": return `${lab}<input type="date" id="${id}" value="${esc(val)}">`;
+    default: return `${lab}<input type="text" id="${id}" value="${esc(val)}" ${f.ph?`placeholder="${esc(f.ph)}"`:""}>${hint}`;
+  }
+}
+function readField(f){
+  const el = document.getElementById("f_" + f.k);
+  if(f.t === "checkbox") return el.checked;
+  if(f.t === "number"){ const n = parseFloat(el.value); return isFinite(n) ? n : ""; }
+  if(f.t === "numlist") return el.value.split(",").map(s => parseFloat(s)).filter(isFinite);
+  return el.value.trim();
+}
+function fieldsHTML(fields, item, p){
+  let out = "", buf = [];
+  const flush = () => { if(buf.length){ out += `<div class="two">${buf.join("")}</div>`; buf = []; } };
+  fields.forEach(f => { const h = `<div class="field">${fieldHTML(f, item[f.k], p)}</div>`; if(f.half){ buf.push(h); if(buf.length === 2) flush(); } else { flush(); out += h; } });
+  flush(); return out;
+}
+function defaults(p, col){
+  switch(p.type){
+    case "kpi": return {dir:"up", history:[]};
+    case "portfolio": return {health:"on", progress:0};
+    case "problems": return {severity:"Medium", stage:"Define"};
+    case "actions": return {due:dayOffset(7), done:false};
+    case "kanban": return {col: col || p.data.columns[0]?.id, blocked:false};
+  }
+  return {};
+}
+function openItemDialog(pid, iid, col){
+  const {p} = findPanel(pid); if(!p) return;
+  const T = TYPES[p.type], list = itemsOf(p);
+  const item = iid ? list.find(x => x.id === iid) : defaults(p, col);
+  if(!item) return;
+  if(p.type === "kanban" && !p.data.columns.length) return openPanelSettings(pid);
+  openDialog({
+    title: (iid ? "Edit " : "Add ") + T.item.toLowerCase(),
+    body: fieldsHTML(T.fields, item, p),
+    submit: iid ? "Save" : "Add " + T.item.toLowerCase(),
+    onSubmit(){
+      const out = {}; T.fields.forEach(f => out[f.k] = readField(f));
+      const first = T.fields[0].k; if(!out[first]) return dlgErr(`Give the ${T.item.toLowerCase()} a name first.`);
+      if(p.type === "kpi" && out.actual !== ""){
+        const h = out.history; const prevActual = iid ? item.actual : null;
+        if(!h.length || (iid && Number(out.actual) !== Number(prevActual) && h[h.length-1] !== out.actual)) h.push(out.actual);
+      }
+      if(p.type === "portfolio") out.progress = Math.max(0, Math.min(100, Number(out.progress)||0));
+      if(iid) Object.assign(item, out); else list.push({id:uid(), ...out});
+      commit();
+    },
+    danger: iid ? {label:"Delete " + T.item.toLowerCase(), onConfirm(){ const i = list.indexOf(item); if(i > -1) list.splice(i, 1); commit(); }} : null
+  });
+}
+const SPANS = [[1,"One third"],[2,"Two thirds"],[3,"Full width"]];
+function openPanelSettings(pid){
+  const {w, p} = findPanel(pid); if(!p) return;
+  let extra = "";
+  if(p.type === "statement") extra = `<div class="field"><label for="ps_text">Statement</label><textarea id="ps_text" rows="3">${esc(p.data.text)}</textarea></div><div class="field"><label for="ps_meta">Supporting line</label><input type="text" id="ps_meta" value="${esc(p.data.meta)}" placeholder="Owner, cadence or date"></div>`;
+  if(p.type === "kanban") extra = `<div class="field"><label for="ps_cols">Columns</label><textarea id="ps_cols" rows="5">${esc(p.data.columns.map(c => c.name + (Number(c.wip)>0 ? " | " + c.wip : "")).join("\n"))}</textarea><span class="hint">One column per line. Add a WIP limit after a bar, for example: In progress | 3. Cards in a removed column move to the first column.</span></div>`;
+  openDialog({
+    title: "Edit panel",
+    body: `<div class="two"><div class="field"><label for="ps_title">Panel title</label><input type="text" id="ps_title" value="${esc(p.title)}"></div>
+      <div class="field"><label for="ps_span">Width on the wall</label><select id="ps_span">${SPANS.map(([n,l]) => `<option value="${n}" ${Number(p.span)===n?"selected":""}>${l}</option>`).join("")}</select></div></div>${extra}`,
+    onSubmit(){
+      const title = v("ps_title").trim(); if(!title) return dlgErr("Give the panel a title.");
+      p.title = title; p.span = Number(v("ps_span")) || 1;
+      if(p.type === "statement"){ p.data.text = v("ps_text").trim(); p.data.meta = v("ps_meta").trim(); }
+      if(p.type === "kanban"){
+        const lines = v("ps_cols").split("\n").map(s => s.trim()).filter(Boolean);
+        if(!lines.length) return dlgErr("A flow board needs at least one column.");
+        const cols = lines.map((line, i) => { const [name, wip] = line.split("|").map(s => s.trim()); const prev = p.data.columns[i]; return {id: prev ? prev.id : uid(), name, wip: parseInt(wip, 10) || 0}; });
+        const ids = new Set(cols.map(c => c.id));
+        p.data.cards.forEach(c => { if(!ids.has(c.col)) c.col = cols[0].id; });
+        p.data.columns = cols;
+      }
+      commit();
+    },
+    danger: {label:"Delete panel", onConfirm(){ w.panels.splice(w.panels.indexOf(p), 1); commit(); }}
+  });
+}
+function openAddPanel(wid){
+  const w = wallById(wid); if(!w) return;
+  openDialog({
+    title: "Add panel",
+    body: `<div class="field"><span class="legend">Panel type</span><div class="type-pick">${Object.entries(TYPES).map(([k,T], i) => `<label><input type="radio" name="ptype" value="${k}" ${i===0?"checked":""}>${T.label}<small>${T.desc}</small></label>`).join("")}</div></div>
+      <div class="two"><div class="field"><label for="np_title">Panel title</label><input type="text" id="np_title" placeholder="For example: Customer KPIs"></div>
+      <div class="field"><label for="np_span">Width on the wall</label><select id="np_span">${SPANS.map(([n,l]) => `<option value="${n}" ${n===1?"selected":""}>${l}</option>`).join("")}</select></div></div>`,
+    submit: "Add panel",
+    onSubmit(){
+      const type = ($("input[name=ptype]:checked") || {}).value || "statement";
+      const title = v("np_title").trim() || TYPES[type].label;
+      const data = type === "statement" ? {text:"Write the statement here.", meta:""}
+        : type === "kanban" ? {columns:[{id:uid(),name:"To do",wip:0},{id:uid(),name:"Doing",wip:3},{id:uid(),name:"Done",wip:0}], cards:[]}
+        : {items:[]};
+      w.panels.push({id:uid(), type, title, span:Number(v("np_span"))||1, data});
+      commit();
+    }
+  });
+}
+function openWallSettings(wid){
+  const w = wallById(wid); if(!w) return;
+  const i = state.walls.indexOf(w);
+  openDialog({
+    title: "Wall settings",
+    body: `<div class="field"><label for="ws_name">Wall name</label><input type="text" id="ws_name" value="${esc(w.name)}"></div>
+      <div class="field"><label for="ws_sub">Subtitle</label><input type="text" id="ws_sub" value="${esc(w.subtitle)}" placeholder="The question this wall answers"></div>
+      <div class="field"><label for="ws_pos">Screen</label><select id="ws_pos">${state.walls.map((_, n) => `<option value="${n}" ${n===i?"selected":""}>Screen ${n+1}</option>`).join("")}</select><span class="hint">Screens are numbered left to right around the room.</span></div>`,
+    onSubmit(){
+      const name = v("ws_name").trim(); if(!name) return dlgErr("Give the wall a name.");
+      w.name = name; w.subtitle = v("ws_sub").trim();
+      const to = Number(v("ws_pos")); state.walls.splice(i, 1); state.walls.splice(to, 0, w);
+      commit();
+    },
+    danger: {label:"Delete wall", onConfirm(){ state.walls.splice(state.walls.indexOf(w), 1); location.hash = "#overview"; commit(); }}
+  });
+}
+function openAddWall(){
+  openDialog({
+    title: "Add wall",
+    body: `<div class="field"><label for="aw_from">Start from</label><select id="aw_from"><option value="">Blank wall</option>${Object.entries(LIBRARY).map(([k,L]) => `<option value="${k}">${esc(L.name)} (example panels)</option>`).join("")}</select></div>
+      <div class="field"><label for="aw_name">Wall name</label><input type="text" id="aw_name" placeholder="Uses the template name if left blank"></div>`,
+    submit: "Add wall",
+    onSubmit(){
+      const from = v("aw_from"), name = v("aw_name").trim();
+      let w;
+      if(from) w = buildWall(from); else { if(!name) return dlgErr("Name the blank wall."); w = {id:"w" + uid(), name, subtitle:"", panels:[]}; }
+      if(name) w.name = name;
+      state.walls.push(w); state.example = false; save(); location.hash = "#wall-" + w.id; route();
+    }
+  });
+}
+function openCustomize(){
+  const themeSel = (id, val) => `<select id="${id}">${[["auto","Match device"],["light","Light"],["dark","Dark"]].map(([k,l]) => `<option value="${k}" ${val===k?"selected":""}>${l}</option>`).join("")}</select>`;
+  openDialog({
+    title: "Customize room",
+    body: `<div class="field"><label for="c_name">Room name</label><input type="text" id="c_name" value="${esc(state.roomName)}"></div>
+      <div class="field"><span class="legend">Accent color</span><div class="swatches">${Object.entries(ACCENTS).map(([k,a]) => `<label class="swatch" title="${a.name}"><input type="radio" name="c_accent" value="${k}" ${state.accent===k?"checked":""} aria-label="${a.name}"><span style="background:${a.l}"></span></label>`).join("")}</div></div>
+      <div class="two"><div class="field"><label for="c_theme">Theme on laptops</label>${themeSel("c_theme", state.theme)}</div>
+      <div class="field"><label for="c_tv">Theme on TVs</label>${themeSel("c_tv", state.tvTheme)}<span class="hint">Dark is easier on a room full of screens.</span></div></div>
+      <div class="two"><div class="field"><label for="c_density">Density</label><select id="c_density"><option value="comfortable" ${state.density!=="compact"?"selected":""}>Comfortable</option><option value="compact" ${state.density==="compact"?"selected":""}>Compact</option></select></div>
+      <div class="field"><label for="c_rotate">Rotate displays every (seconds)</label><input type="number" id="c_rotate" min="0" step="5" value="${Number(state.rotate)||0}"><span class="hint">0 keeps each TV on one wall. Use rotation when you have fewer TVs than walls.</span></div></div>
+      <div class="dlg-section"><h4>Room templates</h4><span class="hint">Loading a template replaces every wall.</span>
+        <div class="btn-row">${Object.entries(TEMPLATES).map(([k,t]) => `<button type="button" class="btn small" data-action="load-template" data-tpl="${k}" title="${esc(t.desc)}">${esc(t.name)}</button>`).join("")}</div></div>
+      <div class="dlg-section"><h4>Backup</h4>
+        <div class="field"><label for="c_json">Room data (JSON)</label><textarea id="c_json" rows="4" spellcheck="false" placeholder="Show the current data, or paste a backup here to import it."></textarea></div>
+        <div class="btn-row"><button type="button" class="btn small" data-action="show-json">Show current data</button><button type="button" class="btn small" data-action="copy-json">Copy</button><button type="button" class="btn small" data-action="import-json">Import pasted data</button><span id="c_msg" class="hint" role="status"></span></div></div>`,
+    onSubmit(){
+      state.roomName = v("c_name").trim() || "Obeya Room";
+      state.accent = ($("input[name=c_accent]:checked") || {}).value || state.accent;
+      state.theme = v("c_theme"); state.tvTheme = v("c_tv"); state.density = v("c_density");
+      state.rotate = Math.max(0, parseInt(v("c_rotate"), 10) || 0);
+      save(); route();
+    }
+  });
+}
+
+/* ---------- Events ---------- */
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-action]"); if(!el) return;
+  const a = el.dataset.action, pid = el.dataset.panel;
+  if(a === "toggle-done") return;
+  if(document.body.classList.contains("tv") && a !== "exit-tv") return;
+  switch(a){
+    case "dlg-close": closeDialog(); break;
+    case "add-wall": openAddWall(); break;
+    case "wall-settings": openWallSettings(el.dataset.wall); break;
+    case "add-panel": openAddPanel(el.dataset.wall); break;
+    case "panel-settings": openPanelSettings(pid); break;
+    case "add-item": openItemDialog(pid, null, el.dataset.col); break;
+    case "edit-item": openItemDialog(pid, el.dataset.item); break;
+    case "customize": openCustomize(); break;
+    case "move-panel": { const {w, p} = findPanel(pid); const i = w.panels.indexOf(p), j = i + Number(el.dataset.dir); if(j >= 0 && j < w.panels.length){ w.panels.splice(i, 1); w.panels.splice(j, 0, p); commit(); } break; }
+    case "open-tv": if(el.dataset.wall) location.hash = "#tv-" + el.dataset.wall; break;
+    case "display-current": { const h = location.hash.replace("#", ""); const id = h.startsWith("wall-") ? h.slice(5) : state.walls[0]?.id; if(id) location.hash = "#tv-" + id; break; }
+    case "exit-tv": location.hash = tvWallId ? "#wall-" + tvWallId : "#overview"; break;
+    case "load-template": {
+      if(el.dataset.armed !== "1"){ $$("[data-action=load-template]").forEach(b => { b.dataset.armed = ""; b.classList.remove("danger"); b.textContent = TEMPLATES[b.dataset.tpl].name; }); el.dataset.armed = "1"; el.classList.add("danger"); el.textContent = "Replace all walls? Click again"; break; }
+      const keep = {roomName:state.roomName, theme:state.theme, tvTheme:state.tvTheme, accent:state.accent, density:state.density, rotate:state.rotate};
+      state = Object.assign(seed(el.dataset.tpl), keep); save(); closeDialog(); location.hash = "#overview"; route(); break;
+    }
+    case "show-json": $("#c_json").value = JSON.stringify(state, null, 1); $("#c_msg").textContent = ""; break;
+    case "copy-json": {
+      const t = $("#c_json"); if(!t.value) t.value = JSON.stringify(state, null, 1);
+      const msg = $("#c_msg");
+      try{ navigator.clipboard.writeText(t.value).then(() => msg.textContent = "Copied.", () => { t.select(); msg.textContent = "Copy was blocked. The text is selected, so press Ctrl+C."; }); }
+      catch(err){ t.select(); msg.textContent = "Copy was blocked. The text is selected, so press Ctrl+C."; }
+      break;
+    }
+    case "import-json": {
+      const msg = $("#c_msg");
+      try{ const s = JSON.parse($("#c_json").value); if(!valid(s)) throw new Error("shape"); state = s; save(); closeDialog(); location.hash = "#overview"; route(); }
+      catch(err){ msg.textContent = "That is not valid room data. Paste the full JSON from a backup."; }
+      break;
+    }
+  }
+});
+document.addEventListener("change", e => {
+  const el = e.target;
+  if(el.dataset && el.dataset.action === "toggle-done"){
+    const {p} = findPanel(el.dataset.panel); const it = p && p.data.items.find(x => x.id === el.dataset.item);
+    if(it){ it.done = el.checked; commit(); }
+  }
+});
+document.addEventListener("keydown", e => {
+  if(!document.body.classList.contains("tv") || dlg.open) return;
+  if(e.key === "Escape") location.hash = tvWallId ? "#wall-" + tvWallId : "#overview";
+  if(e.key === "ArrowRight" || e.key === "ArrowLeft"){
+    const i = state.walls.findIndex(w => w.id === tvWallId); if(i < 0) return;
+    const n = state.walls[(i + (e.key === "ArrowRight" ? 1 : -1) + state.walls.length) % state.walls.length];
+    location.hash = "#tv-" + n.id;
+  }
+});
+document.addEventListener("mousemove", () => {
+  if(!document.body.classList.contains("tv")) return;
+  document.body.classList.add("pointer"); clearTimeout(pointerTimer);
+  pointerTimer = setTimeout(() => document.body.classList.remove("pointer"), 2500);
+});
+function bindDnD(){
+  $$("#main .card[draggable]").forEach(c => {
+    c.addEventListener("dragstart", e => { e.dataTransfer.setData("text/plain", c.dataset.panel + "|" + c.dataset.item); e.dataTransfer.effectAllowed = "move"; c.classList.add("dragging"); });
+    c.addEventListener("dragend", () => c.classList.remove("dragging"));
+  });
+  $$("#main .col").forEach(col => {
+    col.addEventListener("dragover", e => { e.preventDefault(); col.classList.add("drop"); });
+    col.addEventListener("dragleave", e => { if(!col.contains(e.relatedTarget)) col.classList.remove("drop"); });
+    col.addEventListener("drop", e => {
+      e.preventDefault(); col.classList.remove("drop");
+      const [pid, iid] = (e.dataTransfer.getData("text/plain") || "").split("|");
+      if(pid !== col.dataset.panel) return;
+      const {p} = findPanel(pid); const card = p && p.data.cards.find(x => x.id === iid);
+      if(card && card.col !== col.dataset.col){ card.col = col.dataset.col; p.data.cards = p.data.cards.filter(x => x !== card).concat(card); commit(); }
+    });
+  });
+}
+
+if(!location.hash){ try{ history.replaceState(null, "", "#overview"); }catch(e){} }
+route();
+})();
+</script>
+</body>
+</html>
