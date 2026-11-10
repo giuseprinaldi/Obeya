@@ -103,7 +103,9 @@ interface TextProps {
   label: string;
   value: string;
   onChange: (v: string) => void;
-  type?: "text" | "number" | "date" | "search";
+  type?: "text" | "number" | "date" | "search" | "password";
+  /** Passed to the input, e.g. "off" or "new-password". */
+  autoComplete?: string;
   placeholder?: string;
   hint?: string;
   min?: number;
@@ -112,7 +114,7 @@ interface TextProps {
   list?: string;
 }
 
-export function TextField({ label, value, onChange, type = "text", placeholder, hint, min, max, step, list }: TextProps) {
+export function TextField({ label, value, onChange, type = "text", autoComplete, placeholder, hint, min, max, step, list }: TextProps) {
   const id = useId();
   return (
     <div className="field">
@@ -126,6 +128,7 @@ export function TextField({ label, value, onChange, type = "text", placeholder, 
         max={max}
         step={type === "number" ? (step ?? "any") : undefined}
         list={list}
+        autoComplete={autoComplete}
         inputMode={type === "number" ? "decimal" : undefined}
         onChange={(e) => onChange(e.target.value)}
       />

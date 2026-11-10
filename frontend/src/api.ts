@@ -1,11 +1,14 @@
 /* HTTP client for the Obeya API. Same origin; every error body is {error}. */
 import type {
+  Access,
   AutoResult,
   BoardResult,
+  Diagnostics,
   JiraBoard,
   JiraField,
   JiraStatus,
   MetricResult,
+  PasscodeRequest,
   PreviewRequest,
   ProgressResult,
   SaveRoomConflict,
@@ -14,6 +17,7 @@ import type {
   ServerState,
   Settings,
   SyncResponse,
+  UnlockRequest,
 } from "./types";
 
 /** A response the server sent with a non-2xx status. Network failures throw a plain TypeError instead. */
@@ -38,12 +42,24 @@ export function errorText(e: unknown): string {
   return "The Obeya server cannot be reached.";
 }
 
+/** True when the server said this browser may not edit (401). */
+export const isLocked = (e: unknown): boolean => e instanceof ApiFailure && e.status === 401;
+
+let onLocked: (() => void) | null = null;
+/** The store registers here to hear about every 401, whichever call it came from. */
+export function setLockedHandler(fn: () => void): void {
+  onLocked = fn;
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  // The server only accepts JSON on PUT and POST, so every one of them sends a JSON body, even when it is empty.
+  const sends = method !== "GET";
   const res = await fetch(path, {
     method,
-    headers: body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    headers: sends ? { Accept: "application/json", "Content-Type": "application/json" } : { Accept: "application/json" },
+    body: sends ? JSON.stringify(body ?? {}) : undefined,
     cache: "no-store",
+    credentials: "same-origin",
   });
   const text = await res.text();
   let data: unknown = null;
@@ -57,6 +73,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       typeof data === "object" && data !== null && "error" in data && typeof (data as { error: unknown }).error === "string"
         ? (data as { error: string }).error
         : `The server answered ${res.status}.`;
+    if (res.status === 401) onLocked?.();
     throw new ApiFailure(res.status, msg, data);
   }
   return data as T;
@@ -92,4 +109,11 @@ export const api = {
   piValues: (): Promise<string[]> => request<string[]>("GET", "/api/jira/pi-values"),
   preview: (req: PreviewRequest): Promise<PreviewResult> => request<PreviewResult>("POST", "/api/jira/preview", req),
   sync: (): Promise<SyncResponse> => request<SyncResponse>("POST", "/api/sync"),
+
+  /** 403 = wrong passcode, 429 = too many attempts; both carry the text to show. */
+  unlock: (req: UnlockRequest): Promise<Access> => request<Access>("POST", "/api/unlock", req),
+  lock: (): Promise<Access> => request<Access>("POST", "/api/lock"),
+  setPasscode: (req: PasscodeRequest): Promise<Access> => request<Access>("PUT", "/api/passcode", req),
+  /** Runs the Jira connection checks. Can take several seconds. */
+  diagnostics: (): Promise<Diagnostics> => request<Diagnostics>("GET", "/api/jira/diagnostics"),
 };

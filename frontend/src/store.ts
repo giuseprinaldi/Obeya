@@ -1,12 +1,13 @@
 /* The one store. It holds the room and the live Jira data, saves edits to the server
    (optimistic, with a version check) and polls for changes made elsewhere. */
 import { useSyncExternalStore } from "react";
-import { api, errorText, isTransient } from "./api";
+import { api, errorText, isLocked, isTransient, setLockedHandler } from "./api";
+import { OPEN_ACCESS, accessOf } from "./logic/access";
 import { normalizeRoom } from "./logic/normalize";
 import type { LiveData } from "./logic/progress";
 import { seed } from "./logic/seed";
 import { todayISO } from "./logic/util";
-import type { AutoResult, BoardResult, MetricResult, Periods, ProgressResult, Room, ServerState, SyncInfo } from "./types";
+import type { Access, AutoResult, BoardResult, MetricResult, Periods, ProgressResult, Room, ServerState, SyncInfo } from "./types";
 
 export interface StoreState {
   /** False until the first answer from the server. */
@@ -22,6 +23,8 @@ export interface StoreState {
   metrics: Record<string, MetricResult>;
   periods: Periods;
   sync: SyncInfo;
+  /** Whether this browser may edit. View-only browsers never save, seed or open editors. */
+  access: Access;
   /** "retrying" means an edit has not reached the server yet. */
   saveState: "idle" | "saving" | "retrying";
   /** ISO time of the first failed poll since the last good one. */
@@ -41,6 +44,7 @@ let state: StoreState = {
   metrics: {},
   periods: { today: todayISO(), pi: null, nextPi: null, sprint: null },
   sync: { jiraConfigured: false, running: false, lastRunAt: null, lastOk: null, lastError: null, intervalSeconds: 300 },
+  access: OPEN_ACCESS,
   saveState: "idle",
   offlineSince: null,
   toast: null,
@@ -62,8 +66,11 @@ let retryTimer: ReturnType<typeof setTimeout> | undefined;
 let followUps: ReturnType<typeof setTimeout>[] = [];
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
+let lockNoticeAt = 0;
+
 const RETRY_MS = 3000;
 const FOLLOW_UP_MS = [2000, 6000];
+const LOCKED_TEXT = "Editing is locked. Unlock it to make changes.";
 
 function toast(message: string): void {
   clearTimeout(toastTimer);
@@ -83,11 +90,14 @@ function applyServer(s: ServerState, seqAtStart: number, force: boolean): void {
     metrics: s.metrics ?? {},
     periods: s.periods ?? state.periods,
     sync: s.sync ?? state.sync,
+    // An older server sends no access: the room is open.
+    access: accessOf(s.access),
   };
   const quiet = !dirty && !inFlight && seqAtStart === saveSeq;
   if (s.room === null) {
     set(patch);
-    if (quiet && !seeding) void seedRoom();
+    // A view-only browser never sets the room up; it waits for someone who may edit.
+    if (quiet && !seeding && state.access.canEdit) void seedRoom();
     return;
   }
   const newer = state.room === null || s.version > state.version;
@@ -133,6 +143,20 @@ async function refresh(force = false): Promise<void> {
   }
 }
 
+/** The server answered 401 somewhere: this browser may not edit. Any local edit is dropped and the room
+    is read again. Said once, and not at all when the page already knew it was view-only. */
+function handleLocked(): void {
+  const surprise = state.access.canEdit || dirty || inFlight;
+  dirty = false;
+  clearTimeout(retryTimer);
+  if (state.saveState !== "idle") set({ saveState: "idle" });
+  if (!surprise || Date.now() - lockNoticeAt < 3000) return;
+  lockNoticeAt = Date.now();
+  toast(LOCKED_TEXT);
+  void refresh(true);
+}
+setLockedHandler(handleLocked);
+
 function scheduleFollowUps(): void {
   followUps.forEach(clearTimeout);
   followUps = FOLLOW_UP_MS.map((ms) => setTimeout(() => void refresh(), ms));
@@ -170,6 +194,13 @@ async function flush(): Promise<void> {
           }
         }
       } catch (e) {
+        if (isLocked(e)) {
+          // Not a network failure: handleLocked has dropped the edit and is reading the room again.
+          saveSeq++;
+          dirty = false;
+          set({ saveState: "idle" });
+          return;
+        }
         if (isTransient(e)) {
           dirty = true;
           set({ saveState: "retrying" });
@@ -215,7 +246,7 @@ export const store = {
 
   /** Applies an edit locally at once and saves it. Any edit ends "example data" unless keepExample is set. */
   commit(mutate: (room: Room) => void, opts?: { keepExample?: boolean }): void {
-    if (!state.room) return;
+    if (!state.room || !state.access.canEdit) return;
     const draft = structuredClone(state.room);
     mutate(draft);
     if (!opts?.keepExample) draft.example = false;
@@ -226,9 +257,39 @@ export const store = {
 
   /** Swaps in a whole room (template or imported backup) and saves it. */
   replaceRoom(room: Room): void {
+    if (!state.access.canEdit) return;
     dirty = true;
     set({ room });
     void flush();
+  },
+
+  /** Unlocks editing in this browser. Returns the reason when the server says no. */
+  async unlock(passcode: string): Promise<string | void> {
+    try {
+      set({ access: accessOf(await api.unlock({ passcode })) });
+    } catch (e) {
+      return errorText(e);
+    }
+    await refresh(true);
+  },
+
+  /** Puts this browser back to view-only. */
+  async lock(): Promise<void> {
+    try {
+      set({ access: accessOf(await api.lock()) });
+    } catch (e) {
+      toast(errorText(e));
+    }
+    await refresh(true);
+  },
+
+  /** Sets, changes (both given) or removes (next "") the edit passcode. Returns the reason when it fails. */
+  async setPasscode(current: string, next: string): Promise<string | void> {
+    try {
+      set({ access: accessOf(await api.setPasscode({ current, next })) });
+    } catch (e) {
+      return errorText(e);
+    }
   },
 
   dialogOpened(): void {

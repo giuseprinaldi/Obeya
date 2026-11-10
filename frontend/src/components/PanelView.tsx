@@ -41,7 +41,7 @@ interface BodyProps<P extends Panel> {
 function StatementBody({ panel }: BodyProps<StatementPanel>) {
   const ui = useUi();
   return (
-    <button className="statement" type="button" onClick={() => ui.open({ kind: "panel", panelId: panel.id })} aria-label={`Edit ${panel.title}`}>
+    <button className="statement" type="button" disabled={!ui.canEdit} onClick={() => ui.open({ kind: "panel", panelId: panel.id })} aria-label={ui.canEdit ? `Edit ${panel.title}` : undefined}>
       <q>{panel.data.text}</q>
       {panel.data.meta ? <span className="meta">{panel.data.meta}</span> : null}
     </button>
@@ -91,6 +91,7 @@ function KpiBody({ panel, live }: BodyProps<KpiPanel>) {
             type="button"
             className={`kpi st-${e.state === "error" ? "warn" : e.status}${e.state === "error" ? " is-error" : ""}`}
             title={e.detail || undefined}
+            disabled={!ui.canEdit}
             onClick={() => ui.open({ kind: "item", panelId: panel.id, itemId: k.id })}
           >
             <span className="name">
@@ -146,7 +147,7 @@ function PortfolioBody({ panel, live }: BodyProps<PortfolioPanel>) {
         return (
           <div className="row" key={x.id}>
             <div style={{ minWidth: 0 }}>
-              <button type="button" className="row-btn" onClick={() => ui.open({ kind: "item", panelId: panel.id, itemId: x.id })}>
+              <button type="button" className="row-btn" disabled={!ui.canEdit} onClick={() => ui.open({ kind: "item", panelId: panel.id, itemId: x.id })}>
                 <span className="rt">{x.name}</span>
               </button>
               <KeyChip text={pr.keyText || (x.source?.kind === "jql" ? "JQL" : "")} url={pr.url} />
@@ -176,7 +177,7 @@ function ProgressRow({ bar, panel, showKeys }: { bar: BarView; panel: ProgressPa
   return (
     <div className={`pbar st-${bar.status}${bar.state === "error" ? " is-error" : ""}`}>
       <div className="pbar-label">
-        <button type="button" className="row-btn" onClick={edit} aria-label={`Edit ${bar.label}`}>
+        <button type="button" className="row-btn" disabled={!ui.canEdit} onClick={edit} aria-label={ui.canEdit ? `Edit ${bar.label}` : undefined}>
           <span className="rt">{bar.label}</span>
         </button>
         {showKeys && bar.keyText !== bar.label ? <KeyChip text={bar.keyText} url={bar.url} /> : null}
@@ -247,7 +248,7 @@ function ProblemsBody({ panel }: BodyProps<ProblemsPanel>) {
         return (
           <div className={`row st-${SEV[x.severity] ?? "none"}`} key={x.id}>
             <span className="sev" role="img" aria-label={`${x.severity} severity`} />
-            <button type="button" className="row-btn" onClick={() => ui.open({ kind: "item", panelId: panel.id, itemId: x.id })}>
+            <button type="button" className="row-btn" disabled={!ui.canEdit} onClick={() => ui.open({ kind: "item", panelId: panel.id, itemId: x.id })}>
               <div className="rt">{x.title}</div>
               <div className="rs">
                 {[x.severity, x.owner].filter(Boolean).join(" · ")}
@@ -287,8 +288,8 @@ function ActionsBody({ panel, live }: BodyProps<ActionsPanel>) {
         const late = isLate(a, today);
         return (
           <div className={`row${a.done ? " done" : ""}`} key={a.id}>
-            <input type="checkbox" checked={a.done} onChange={(e) => toggle(a.id, e.target.checked)} aria-label={`Mark ${a.text} done`} />
-            <button type="button" className="row-btn" onClick={() => ui.open({ kind: "item", panelId: panel.id, itemId: a.id })}>
+            <input type="checkbox" checked={a.done} disabled={!ui.canEdit} onChange={(e) => toggle(a.id, e.target.checked)} aria-label={`Mark ${a.text} done`} />
+            <button type="button" className="row-btn" disabled={!ui.canEdit} onClick={() => ui.open({ kind: "item", panelId: panel.id, itemId: a.id })}>
               <div className="rt">{a.text}</div>
               <div className="rs">{a.owner}</div>
             </button>
@@ -380,6 +381,7 @@ function ManualBoardBody({ panel }: BodyProps<KanbanPanel>) {
   const drop = (e: DragEvent<HTMLDivElement>, colId: string): void => {
     e.preventDefault();
     setDropCol(null);
+    if (!ui.canEdit) return;
     const [pid, cardId] = (e.dataTransfer.getData("text/plain") || "").split("|");
     if (pid !== panel.id || !cardId) return;
     store.commit((room) => {
@@ -424,7 +426,8 @@ function ManualBoardBody({ panel }: BodyProps<KanbanPanel>) {
                 key={x.id}
                 type="button"
                 className={`card${x.blocked ? " blocked" : ""}${dragging === x.id ? " dragging" : ""}`}
-                draggable
+                disabled={!ui.canEdit}
+                draggable={ui.canEdit}
                 onDragStart={(e) => {
                   e.dataTransfer.setData("text/plain", `${panel.id}|${x.id}`);
                   e.dataTransfer.effectAllowed = "move";
@@ -444,9 +447,11 @@ function ManualBoardBody({ panel }: BodyProps<KanbanPanel>) {
                 </span>
               </button>
             ))}
-            <button type="button" className="add" onClick={() => ui.open({ kind: "item", panelId: panel.id, col: c.id })}>
-              + Card
-            </button>
+            {ui.canEdit ? (
+              <button type="button" className="add" onClick={() => ui.open({ kind: "item", panelId: panel.id, col: c.id })}>
+                + Card
+              </button>
+            ) : null}
           </div>
         );
       })}
@@ -492,13 +497,15 @@ export function PanelView({ panel, wall, live, tv }: { panel: Panel; wall: Wall;
     });
 
   const addItem = (): void => ui.open(panel.type === "progress" ? { kind: "bar", panelId: panel.id } : { kind: "item", panelId: panel.id });
+  // A TV shows no controls, and neither does a browser that may not edit.
+  const controls = !tv && ui.canEdit;
 
   return (
     <section className={`panel span-${panel.span || 1} st-${st}`}>
       <header className="panel-head">
         <h3>{panel.title}</h3>
         <span className="ptype">{T.label}</span>
-        {tv ? null : (
+        {!controls ? null : (
           <div className="tools">
             <button type="button" className="icon-btn" onClick={() => move(-1)} aria-label={`Move ${panel.title} earlier`} disabled={i === 0}>
               ←
@@ -515,7 +522,7 @@ export function PanelView({ panel, wall, live, tv }: { panel: Panel; wall: Wall;
       <div className="panel-body">
         <Body panel={panel} live={live} tv={tv} />
       </div>
-      {!tv && T.item && panel.type !== "kanban" ? (
+      {controls && T.item && panel.type !== "kanban" ? (
         <div className="panel-foot">
           <button type="button" className="add" onClick={addItem}>
             + Add {itemNoun(panel.type)}

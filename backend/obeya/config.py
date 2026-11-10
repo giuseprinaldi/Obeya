@@ -41,6 +41,9 @@ class Config:
     jira_email: str
     jira_ca_bundle: str
     jira_timeout: int
+    auth_header: str = ""           # header set by a sign-in proxy, e.g. X-Forwarded-User
+    editors: tuple = ()             # names from that header who may edit; "*" = anyone signed in
+    edit_session_hours: float = 12  # how long a browser stays unlocked after the passcode
 
     @property
     def jira_configured(self) -> bool:
@@ -50,6 +53,13 @@ class Config:
 def _int(name: str, default: int) -> int:
     try:
         return int(os.environ.get(name, "") or default)
+    except ValueError:
+        return default
+
+
+def _float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, "") or default)
     except ValueError:
         return default
 
@@ -70,4 +80,7 @@ def load_config() -> Config:
         jira_email=env.get("JIRA_EMAIL", "").strip(),
         jira_ca_bundle=env.get("JIRA_CA_BUNDLE", "").strip(),
         jira_timeout=_int("JIRA_TIMEOUT", 30),
+        auth_header=env.get("OBEYA_AUTH_HEADER", "").strip(),
+        editors=tuple(e.strip() for e in env.get("OBEYA_EDITORS", "").split(",") if e.strip()),
+        edit_session_hours=_float("OBEYA_EDIT_SESSION_HOURS", 12),
     )

@@ -10,14 +10,18 @@ export type DialogSpec =
   | { kind: "wall"; wallId: string }
   | { kind: "addWall" }
   | { kind: "customize" }
-  | { kind: "jira" };
+  | { kind: "jira" }
+  | { kind: "unlock" };
 
 export interface Ui {
+  /** Opens a dialog. While the browser is view-only only the unlock dialog opens. */
   open(d: DialogSpec): void;
   close(): void;
+  /** False when the room is locked and this browser has not unlocked it: everything is read-only. */
+  canEdit: boolean;
 }
 
-export const UiContext = createContext<Ui>({ open: () => undefined, close: () => undefined });
+export const UiContext = createContext<Ui>({ open: () => undefined, close: () => undefined, canEdit: true });
 export const useUi = (): Ui => useContext(UiContext);
 
 export const wallById = (room: Room, id: string): Wall | undefined => room.walls.find((w) => w.id === id);
@@ -30,14 +34,7 @@ export function findPanel(room: Room, panelId: string): { wall: Wall; panel: Pan
   return null;
 }
 
-export type Route = { view: "overview" } | { view: "wall"; id: string } | { view: "tv"; id: string };
-
-export function parseRoute(hash: string): Route {
-  const h = hash.replace(/^#/, "");
-  if (h.startsWith("tv-")) return { view: "tv", id: h.slice(3) };
-  if (h.startsWith("wall-")) return { view: "wall", id: h.slice(5) };
-  return { view: "overview" };
-}
+export { parseRoute, type Route } from "./logic/route";
 
 export function go(hash: string): void {
   window.location.hash = hash;

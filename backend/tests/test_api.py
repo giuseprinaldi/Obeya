@@ -49,6 +49,7 @@ def progress_panel(items, auto=None):
 class ApiCase(unittest.TestCase):
     jira = True
     postgres = False
+    cfg_overrides: dict = {}
 
     @classmethod
     def setUpClass(cls):
@@ -64,9 +65,10 @@ class ApiCase(unittest.TestCase):
         cls.cfg = replace(
             cfg, host="127.0.0.1", port=0, sync_seconds=3600, jira_auth="bearer",
             jira_base_url=f"http://127.0.0.1:{cls.fake.server_address[1]}" if cls.jira else "",
-            jira_token=DEFAULT_TOKEN if cls.jira else "")
+            jira_token=DEFAULT_TOKEN if cls.jira else "", **cls.cfg_overrides)
         cls.syncer = Syncer(cls.db, cls.cfg)   # not started: tests trigger runs themselves
-        cls.server = make_server(App(cls.cfg, cls.db, cls.syncer))
+        cls.app = App(cls.cfg, cls.db, cls.syncer)
+        cls.server = make_server(cls.app)
         threading.Thread(target=cls.server.serve_forever, daemon=True).start()
         cls.base = f"http://127.0.0.1:{cls.server.server_address[1]}"
 
@@ -83,6 +85,8 @@ class ApiCase(unittest.TestCase):
         with self.db.connect() as conn:
             for table in ("room", "room_history", "settings", "progress_cache", "progress_history", "kv", "sync_run"):
                 conn.execute(f"DELETE FROM {table}")
+        self.app.access._cached = None       # the passcode record lives in kv, which was just emptied
+        self.app.access._failures.clear()
 
     def save(self, doc, base_version):
         return call(self.base, "PUT", "/api/room", {"room": doc, "baseVersion": base_version})
@@ -137,10 +141,14 @@ class RoomApi(ApiCase):
         self.assertIsNone(self.state()["room"])
 
     def test_bad_json_unknown_routes_and_methods(self):
-        req = urllib.request.Request(self.base + "/api/room", data=b"{nope", method="PUT")
-        with self.assertRaises(urllib.error.HTTPError) as ctx:
-            urllib.request.urlopen(req, timeout=10)
-        self.assertEqual(ctx.exception.code, 400)
+        for ctype, expected in (("application/json", 400), ("application/json; charset=utf-8", 400),
+                                ("text/plain", 415), ("application/x-www-form-urlencoded", 415)):
+            req = urllib.request.Request(self.base + "/api/room", data=b"{nope", method="PUT",
+                                         headers={"Content-Type": ctype})
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(req, timeout=10)
+            with ctx.exception:
+                self.assertEqual(ctx.exception.code, expected, ctype)
         self.assertEqual(call(self.base, "GET", "/api/nope")[0], 404)
         self.assertEqual(call(self.base, "POST", "/api/state", {})[0], 404)
         self.assertEqual(call(self.base, "GET", "/api/health")[1], {"ok": True})

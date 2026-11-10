@@ -65,16 +65,62 @@ A KPI can take its value from Jira instead of being typed in. Target and directi
 
 **Blocked** is defined once, under "Blocked means" in Jira settings, and used by cards and metrics alike: the Flagged field, named statuses, named labels, an unresolved "is blocked by" link, or any combination. Blocked days can only replay the flag and statuses, because labels and links leave no usable history.
 
+## Who can edit
+
+Reading the room is always open, so TVs need no sign-in. Editing works in one of three ways:
+
+- **Open (the default).** Until a passcode is set, anyone who can reach the server can edit.
+- **Passcode.** Set under Customize in the app. From then on a browser is view-only until someone enters the passcode, which unlocks that browser for 12 hours (`OBEYA_EDIT_SESSION_HOURS`). Changing or removing the passcode needs the current one and ends every other unlocked session. If it is forgotten, run `python -m obeya reset-passcode` on the server.
+- **Sign-in proxy.** If a reverse proxy signs people in, set `OBEYA_AUTH_HEADER` to the header it passes the user name in and `OBEYA_EDITORS` to the names allowed to edit (`*` for anyone it lets in). This can be combined with a passcode. Only use it when the server cannot be reached except through the proxy, because the server believes whatever that header says.
+
+While locked, a view-only browser can call only `GET /api/state`, `GET /api/health`, `POST /api/unlock` and `POST /api/lock`. Everything else answers 401, including the Jira endpoints, so a visitor cannot run Jira queries through the service account.
+
+How it is built:
+
+- The passcode is stored only as a salted PBKDF2-SHA256 hash (200,000 rounds).
+- An unlocked browser holds a signed, expiring cookie (`HttpOnly`, `SameSite=Strict`, and `Secure` when the proxy reports https). The signing key is generated on first use and kept in the database.
+- Wrong guesses are limited to 8 in 5 minutes across all browsers.
+- Every PUT and POST must be JSON. Together with the cookie settings, that stops another website from acting through an unlocked browser.
+
+## Screen addresses
+
+A TV opens `/#screen-N`. It shows whichever wall is at position N and follows it when walls are reordered, replaced or loaded from a template, so nobody has to touch the TV. `/#tv-<wall-id>` still pins one specific wall.
+
+## Checking a real Jira
+
+`GET /api/jira/diagnostics`, the "Check the connection" button in Jira settings, and `python -m obeya check` on the server all run the same list of checks and say what to do about each warning or failure:
+
+| Check | What it tells you |
+|---|---|
+| Jira address and token | The server has been given both. |
+| Jira can be reached | Network path, TLS and proxy work; reports the Jira type and version. |
+| Token accepted | The account the token belongs to. |
+| Issues are visible | The account can read at least one issue. |
+| Epic Link and Story Points fields | Found automatically, or the field picked in settings exists. |
+| Flagged field | The flag rule for "blocked" can work. |
+| Epic and initiative links | Whether Parent Link exists and whether its values can be read. |
+| PI field | It exists, has values, accepts `=` in a query, and the calendar's current PI name matches a value Jira uses. |
+| PI calendar | There is a current PI and it is not about to run out. |
+| Boards and sprints | The chosen board can be read and has an active sprint. |
+| Status categories | Needed to tell when work started and finished. |
+| Issue histories | Searches return complete histories, which the look-back metrics need. |
+| Days in status on cards | Whether this Jira reports it. |
+
+The command exits with status 1 if any check failed, so it can be used in a deployment script. It reads from Jira and writes nothing.
+
 ## API
 
 All JSON, same origin. Errors are `{"error": "..."}` with a non-2xx status. Types are in `frontend/src/types.ts`.
 
 | Method and path | Purpose |
 |---|---|
-| `GET /api/state` | Room, version, Jira results (`progress`, `auto`, `boards`, `metrics`), `periods`, `sync` status. Sends an ETag. |
+| `GET /api/state` | Room, version, Jira results (`progress`, `auto`, `boards`, `metrics`), `periods`, `sync` status, and `access` (whether this browser may edit). Sends an ETag. |
 | `PUT /api/room` | Body `{room, baseVersion}`. `200 {version, updatedAt}`, or `409 {error: "conflict", version, room}` if someone saved first. `baseVersion` 0 creates the room. |
 | `GET /api/settings`, `PUT /api/settings` | PI field, story points field, board, summaries and assignee names on or off, the blocked rule, PI calendar. Saving triggers a full sync. |
 | `POST /api/sync` | Run a full sync now and wait for it. |
+| `POST /api/unlock`, `POST /api/lock` | Enter the passcode for this browser (sets the session cookie), or go back to view-only. |
+| `PUT /api/passcode` | Body `{current, next}`. Set, change or remove (`next` empty) the edit passcode. |
+| `GET /api/jira/diagnostics` | Run the Jira connection check. |
 | `GET /api/jira/status` | Whether Jira is configured and reachable with the token. |
 | `GET /api/jira/fields`, `GET /api/jira/boards` | For the pickers in Jira settings. |
 | `GET /api/jira/pi-values` | Distinct values recently used in the PI field, as name suggestions. |
@@ -113,17 +159,23 @@ Environment variables, or `backend/.env` (see `backend/.env.example`):
 | `JIRA_AUTH` | `bearer` | `bearer` for a Data Center personal access token; `basic` with `JIRA_EMAIL` for Cloud. |
 | `JIRA_CA_BUNDLE` | empty | CA file for an internal certificate authority. |
 | `HTTPS_PROXY`, `NO_PROXY` | | Standard variables; honoured for the Jira calls. |
+| `OBEYA_AUTH_HEADER`, `OBEYA_EDITORS` | empty | Trust a sign-in proxy's user header; see "Who can edit". |
+| `OBEYA_EDIT_SESSION_HOURS` | `12` | How long a browser stays unlocked. |
 
 ## Deploying on the VM
 
 1. `cd frontend && npm ci && npm run build`
 2. Nothing to install for the backend, unless Postgres is used (`pip install "psycopg[binary]"`).
 3. Set the environment (Jira URL and a read-only token; `DATABASE_URL` only to move the SQLite file or use Postgres) and run `python -m obeya` from `backend/` under the service manager. Make sure the service account can write to the data directory.
-4. Open the app, go to **Jira**, and pick the PI field, the board and enter the PI calendar. This replaces the planned `config/boards.yaml`: it is done once in the UI and can be changed there later.
+4. Run `python -m obeya check` and read what it says about this Jira.
+5. Open the app, go to **Jira**, and pick the PI field, the board and enter the PI calendar. This replaces the planned `config/boards.yaml`: it is done once in the UI and can be changed there later. Run the check again from that screen.
+6. Set an edit passcode under **Customize**.
+7. On each TV, open `/#screen-1`, `/#screen-2` and so on.
 
 ## Security notes
 
-- **No sign-in.** Anyone who can reach the port can edit the room. Put it behind the reverse proxy or SSO used for the other internal tools, or restrict it to the room's network.
+- **Editing is open until it is locked.** Set a passcode under Customize, or put the server behind a sign-in proxy; see "Who can edit". Reading the room stays open to anyone who can reach the port, so keep it on the internal network. There are no per-user accounts and no record of who changed what.
+- **Use https in front of it.** The server speaks plain http. Without TLS at a proxy, the passcode and the session cookie cross the network unencrypted.
 - **Read-only Jira.** The client only sends GET requests and the search POST. Use a read-only service account anyway.
 - **Token handling.** The token is read from the environment, sent only to `JIRA_BASE_URL`, never stored in the database and never sent to a browser. Redirects to another host are refused.
 - **Summaries and names.** "Show Jira summaries on screens" and "Show assignee names on screens" can each be switched off in Jira settings. Bars and cards then show keys only, and the summaries or names never leave the server.
@@ -131,8 +183,8 @@ Environment variables, or `backend/.env` (see `backend/.env.example`):
 
 ## Tested and not tested
 
-- **Tested:** 112 backend tests (`python -m unittest discover -s tests -t .` in `backend/`), covering the PI calendar, JQL variables, progress and flow maths on hand-built histories, the Jira client, hierarchy walk, boards and metrics over real HTTP against the fake Jira, and the API against a real SQLite database. Setting `OBEYA_TEST_DATABASE_URL` to a `postgresql://` URL runs the API tests a second time on Postgres (135 tests in total).
-- **Frontend:** 80 unit tests on the status, pace, link-parsing, calendar, board and KPI logic (`npm test` in `frontend/`). The built app was also run in Chrome against this server and the fake Jira: first-run seeding, linking a bar from a pasted Jira URL, Check link (good and bad keys), auto-fill bars, adding a Jira KPI, switching a flow board between Jira boards, the "Blocked means" and assignee settings taking effect, Jira settings, display mode at 1366x768 and 1920x1080, arrow keys and Escape, and the "changed on another device" conflict path.
+- **Tested:** 137 backend tests (`python -m unittest discover -s tests -t .` in `backend/`), covering the PI calendar, JQL variables, progress and flow maths on hand-built histories, the Jira client, hierarchy walk, boards and metrics over real HTTP against the fake Jira, and the API against a real SQLite database. Setting `OBEYA_TEST_DATABASE_URL` to a `postgresql://` URL runs the API tests a second time on Postgres (160 tests in total). The edit lock is covered there: forged, edited and expired cookies, the guess limit, and every endpoint refusing a locked-out browser.
+- **Frontend:** 105 unit tests on the status, pace, link-parsing, calendar, board, KPI, access and screen-address logic (`npm test` in `frontend/`). The built app was also run in Chrome against this server and the fake Jira: first-run seeding, linking a bar from a pasted Jira URL, Check link (good and bad keys), auto-fill bars, adding a Jira KPI, switching a flow board between Jira boards, the "Blocked means" and assignee settings taking effect, Jira settings, display mode at 1366x768 and 1920x1080, arrow keys and Escape, and the "changed on another device" conflict path. Also run there: the edit lock (set, change and remove the passcode, lock, unlock, a wrong passcode, too many wrong guesses, view-only mode, a session ending mid-edit, and the server-side reset command against the running server); screen addresses (a TV following a reorder within its 30-second refresh, rotation without the address changing, wrap-around, and a screen with no wall); and the connection check section.
 - **Frontend, not tested:** Firefox and Safari (the bar layout uses CSS subgrid, `:has()` and container queries, so use a current browser on the TVs), the wall rotation timer over a long run, and the copy-to-clipboard button.
 - **Display mode has a density limit.** A wall is scaled to fit the screen, and text shrinks as a wall gets denser, down to a floor. Past that floor panels are cut off at the bottom rather than scrolled. The example Delivery wall (four panels, three KPIs, eight bars and a four-column Jira board at six cards per column) fits a 16:9 screen with a little shrinking; much more than that should be split across two walls, or the board given fewer cards per column.
 - **Not tested against real Jira.** The fake follows Data Center's documented shapes, but these need checking on the VM:
@@ -148,4 +200,4 @@ Environment variables, or `backend/.env` (see `backend/.env.example`):
 
 - GitLab metrics.
 - Moving cards from Obeya. Jira boards are read-only here by design.
-- Sign-in and per-user permissions.
+- Per-user sign-in and a record of who changed what.

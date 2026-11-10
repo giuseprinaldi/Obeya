@@ -1,9 +1,15 @@
-/* The editing views: control bar with wall tabs, the room overview, and one wall. */
+/* The editing views: control bar with wall tabs, the room overview, and one wall.
+   Everything that changes the room is shown only when ui.canEdit is true; a view-only browser
+   keeps the navigation, the overview and the display links. */
+import { useState } from "react";
+import { copyText } from "../clipboard";
+import { lockControl } from "../logic/access";
 import { calendarNotice, roomUsesPi } from "../logic/periods";
 import type { LiveData } from "../logic/progress";
+import { screenAddress, screenHash, screenOf } from "../logic/route";
 import { badCount, chipList, signals, wallStatus } from "../logic/status";
 import { fmtDateTime, fmtTime } from "../logic/util";
-import type { StoreState } from "../store";
+import { store, type StoreState } from "../store";
 import type { Room, Status, Wall } from "../types";
 import { go, useUi, type Route } from "../ui";
 import { PanelView } from "./PanelView";
@@ -15,11 +21,45 @@ function jiraDot(s: StoreState): { st: Status; title: string } {
   return { st: "none", title: "Waiting for the first Jira sync" };
 }
 
+/** "View only" with an unlock button, or a lock button, or nothing when the room is open to everyone. */
+export function LockControls({ s }: { s: StoreState }) {
+  const ui = useUi();
+  const [busy, setBusy] = useState(false);
+  const control = lockControl(s.access);
+  const lock = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      await store.lock();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      {s.access.user ? <span className="who">{s.access.user}</span> : null}
+      {control === "unlock" ? (
+        <>
+          <span className="save-state">View only</span>
+          <button type="button" className="btn" onClick={() => ui.open({ kind: "unlock" })}>
+            Unlock editing
+          </button>
+        </>
+      ) : null}
+      {control === "lock" ? (
+        <button type="button" className="btn" onClick={() => void lock()} disabled={busy} title="Put this browser back to view-only">
+          Lock
+        </button>
+      ) : null}
+    </>
+  );
+}
+
 export function ControlBar({ room, route, live, s }: { room: Room; route: Route; live: LiveData; s: StoreState }) {
   const ui = useUi();
   const active = route.view === "wall" ? route.id : "overview";
   const dot = jiraDot(s);
-  const displayId = route.view === "wall" ? route.id : room.walls[0]?.id;
+  // Display mode opens the screen this wall is on (or the first screen from the overview).
+  const screen = route.view === "wall" ? screenOf(room.walls, route.id) : room.walls.length ? 1 : 0;
   return (
     <header className="bar">
       <div className="brand">
@@ -50,9 +90,11 @@ export function ControlBar({ room, route, live, s }: { room: Room; route: Route;
             </a>
           );
         })}
-        <button type="button" className="tab" onClick={() => ui.open({ kind: "addWall" })} aria-label="Add a wall">
-          + Wall
-        </button>
+        {ui.canEdit ? (
+          <button type="button" className="tab" onClick={() => ui.open({ kind: "addWall" })} aria-label="Add a wall">
+            + Wall
+          </button>
+        ) : null}
       </nav>
       <div className="bar-actions">
         {s.saveState === "retrying" ? (
@@ -64,15 +106,20 @@ export function ControlBar({ room, route, live, s }: { room: Room; route: Route;
             Saving…
           </span>
         ) : null}
-        <button type="button" className="btn" onClick={() => ui.open({ kind: "jira" })} title={dot.title}>
-          <span className={`dot st-${dot.st}`} aria-hidden="true" />
-          Jira
-          <span className="sr-only">: {dot.title}</span>
-        </button>
-        <button type="button" className="btn" onClick={() => ui.open({ kind: "customize" })}>
-          Customize
-        </button>
-        <button type="button" className="btn primary" onClick={() => displayId && go(`#tv-${displayId}`)} disabled={!displayId}>
+        <LockControls s={s} />
+        {ui.canEdit ? (
+          <>
+            <button type="button" className="btn" onClick={() => ui.open({ kind: "jira" })} title={dot.title}>
+              <span className={`dot st-${dot.st}`} aria-hidden="true" />
+              Jira
+              <span className="sr-only">: {dot.title}</span>
+            </button>
+            <button type="button" className="btn" onClick={() => ui.open({ kind: "customize" })}>
+              Customize
+            </button>
+          </>
+        ) : null}
+        <button type="button" className="btn primary" onClick={() => screen && go(screenHash(screen))} disabled={!screen}>
           Display mode
         </button>
       </div>
@@ -89,6 +136,26 @@ function Stat({ n, label, status }: { n: number; label: string; status: Status }
   );
 }
 
+/** The address to open on the TV for one screen, with a button that copies it. */
+function ScreenAddress({ n }: { n: number }) {
+  const [note, setNote] = useState("");
+  const address = screenAddress(window.location.origin, window.location.pathname, n);
+  const copy = async (): Promise<void> => {
+    setNote((await copyText(address)) ? "Copied" : "Select and copy it");
+    setTimeout(() => setNote(""), 2500);
+  };
+  return (
+    <div className="addr-row">
+      <code className="addr" title={address}>
+        {address}
+      </code>
+      <button type="button" className="btn small" onClick={() => void copy()} aria-label={`Copy the address of screen ${n}`}>
+        {note || "Copy"}
+      </button>
+    </div>
+  );
+}
+
 export function Overview({ room, live, s }: { room: Room; live: LiveData; s: StoreState }) {
   const ui = useUi();
   const all = signals(
@@ -96,7 +163,6 @@ export function Overview({ room, live, s }: { room: Room; live: LiveData; s: Sto
     live,
   );
   const notice = calendarNotice(live.periods, roomUsesPi(room));
-  const first = room.walls[0]?.id;
   const jiraLine = !s.sync.jiraConfigured
     ? " Jira is not connected, so linked bars are empty."
     : s.sync.lastRunAt
@@ -114,10 +180,12 @@ export function Overview({ room, live, s }: { room: Room; live: LiveData; s: Sto
           </p>
         </div>
         <div className="wall-actions">
-          <button type="button" className="btn" onClick={() => ui.open({ kind: "addWall" })}>
-            + Add wall
-          </button>
-          <button type="button" className="btn primary" onClick={() => first && go(`#tv-${first}`)} disabled={!first}>
+          {ui.canEdit ? (
+            <button type="button" className="btn" onClick={() => ui.open({ kind: "addWall" })}>
+              + Add wall
+            </button>
+          ) : null}
+          <button type="button" className="btn primary" onClick={() => go(screenHash(1))} disabled={!room.walls.length}>
             Start display
           </button>
         </div>
@@ -125,9 +193,11 @@ export function Overview({ room, live, s }: { room: Room; live: LiveData; s: Sto
       {notice ? (
         <div className="notice" role="status">
           <span>{notice}</span>
-          <button type="button" className="btn small" onClick={() => ui.open({ kind: "jira" })}>
-            Open Jira settings
-          </button>
+          {ui.canEdit ? (
+            <button type="button" className="btn small" onClick={() => ui.open({ kind: "jira" })}>
+              Open Jira settings
+            </button>
+          ) : null}
         </div>
       ) : null}
       <div className="summary">
@@ -140,7 +210,7 @@ export function Overview({ room, live, s }: { room: Room; live: LiveData; s: Sto
       </div>
       <div className="section-h">
         <h3>Room plan</h3>
-        <p>Each wall runs on its own screen. Open a display on the TV it belongs to.</p>
+        <p>Each screen has its own address. Open it once on the TV for that screen; the TV then shows whichever wall is on that screen number.</p>
       </div>
       <div className="plan">
         {room.walls.length ? (
@@ -161,11 +231,12 @@ export function Overview({ room, live, s }: { room: Room; live: LiveData; s: Sto
                         </span>
                       ))}
                     </div>
+                    <ScreenAddress n={i + 1} />
                     <div className="screen-links">
                       <a className="btn small" href={`#wall-${w.id}`}>
-                        Edit wall
+                        {ui.canEdit ? "Edit wall" : "View wall"}
                       </a>
-                      <a className="btn small primary" href={`#tv-${w.id}`}>
+                      <a className="btn small primary" href={screenHash(i + 1)}>
                         Open display
                       </a>
                     </div>
@@ -178,10 +249,14 @@ export function Overview({ room, live, s }: { room: Room; live: LiveData; s: Sto
             );
           })
         ) : (
-          <p className="empty">No walls yet. Add one, or load a room template from Customize.</p>
+          <p className="empty">{ui.canEdit ? "No walls yet. Add one, or load a room template from Customize." : "No walls yet."}</p>
         )}
       </div>
-      <p className="footnote">Changes are saved to the Obeya server as you make them, and every screen picks them up within about 30 seconds.{jiraLine} Customize has a JSON backup of the whole room.</p>
+      <p className="footnote">
+        {ui.canEdit
+          ? `Changes are saved to the Obeya server as you make them, and every screen picks them up within about 30 seconds.${jiraLine} Customize has a JSON backup of the whole room.`
+          : `You are looking at this room without editing rights; it updates by itself as others change it.${jiraLine}`}
+      </p>
     </>
   );
 }
@@ -200,19 +275,27 @@ export function WallView({ room, wall, live }: { room: Room; wall: Wall; live: L
           {wall.subtitle ? <p>{wall.subtitle}</p> : null}
         </div>
         <div className="wall-actions">
-          <button type="button" className="btn" onClick={() => ui.open({ kind: "addPanel", wallId: wall.id })}>
-            + Add panel
-          </button>
-          <button type="button" className="btn" onClick={() => ui.open({ kind: "wall", wallId: wall.id })}>
-            Wall settings
-          </button>
-          <a className="btn primary" href={`#tv-${wall.id}`}>
+          {ui.canEdit ? (
+            <>
+              <button type="button" className="btn" onClick={() => ui.open({ kind: "addPanel", wallId: wall.id })}>
+                + Add panel
+              </button>
+              <button type="button" className="btn" onClick={() => ui.open({ kind: "wall", wallId: wall.id })}>
+                Wall settings
+              </button>
+            </>
+          ) : null}
+          <a className="btn primary" href={screenHash(i + 1)}>
             Open display
           </a>
         </div>
       </div>
       <div className="grid">
-        {wall.panels.length ? wall.panels.map((p) => <PanelView key={p.id} panel={p} wall={wall} live={live} tv={false} />) : <p className="empty">This wall is empty. Add a panel to start.</p>}
+        {wall.panels.length ? (
+          wall.panels.map((p) => <PanelView key={p.id} panel={p} wall={wall} live={live} tv={false} />)
+        ) : (
+          <p className="empty">{ui.canEdit ? "This wall is empty. Add a panel to start." : "This wall is empty."}</p>
+        )}
       </div>
     </>
   );

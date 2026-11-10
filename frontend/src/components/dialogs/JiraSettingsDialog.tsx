@@ -7,6 +7,7 @@ import { fmtDateTime } from "../../logic/util";
 import { store, useStore } from "../../store";
 import type { JiraBoard, JiraField, JiraStatus, Period, Settings } from "../../types";
 import { CheckField, Dialog, SelectField, TextField } from "../Dialog";
+import { ConnectionCheck } from "./ConnectionCheck";
 
 interface PiRow extends Period {
   /** Stable key for the row while it is edited. */
@@ -111,6 +112,7 @@ export function JiraSettingsDialog({ onClose }: { onClose: () => void }) {
   // The two "blocked" lists are kept as typed and split into names on save.
   const [blockedStatuses, setBlockedStatuses] = useState("");
   const [blockedLabels, setBlockedLabels] = useState("");
+  const [checking, setChecking] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
   const [syncing, setSyncing] = useState(false);
 
@@ -192,10 +194,14 @@ export function JiraSettingsDialog({ onClose }: { onClose: () => void }) {
         <button type="button" className="btn small" onClick={() => void syncNow()} disabled={syncing || !s.sync.jiraConfigured}>
           {syncing ? "Syncing…" : "Sync now"}
         </button>
+        <button type="button" className="btn small" onClick={() => setChecking(true)} disabled={checking}>
+          Check the connection
+        </button>
         <span className="hint" role="status">
           {syncMsg || lastSync}
         </span>
       </div>
+      {checking ? <ConnectionCheck onClose={() => setChecking(false)} /> : null}
 
       {!settings ? (
         <p className="empty">{loadError || "Loading settings…"}</p>

@@ -1,7 +1,10 @@
-/* Display mode: one wall drawn on a 1600px stage and scaled to fill the screen. */
+/* Display mode: one wall drawn on a 1600px stage and scaled to fill the screen.
+   A display is opened either on a screen number (#screen-2: whatever wall is second right now)
+   or pinned to one wall (#tv-<wallId>). */
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { periodLine } from "../logic/periods";
 import type { LiveData } from "../logic/progress";
+import { neighbourScreen, screenHash, screenWall } from "../logic/route";
 import { chipList, signals } from "../logic/status";
 import { tvRowWeights } from "../logic/tvlayout";
 import { fmtDateTime, fmtTime } from "../logic/util";
@@ -17,7 +20,50 @@ const STAGE_MAX = 2600;
 const STAGE_STEP = 100;
 const POINTER_IDLE_MS = 2500;
 
-export function TvView({ room, wall, live, s }: { room: Room; wall: Wall; live: LiveData; s: StoreState }) {
+/** What the keys and the rotation timer do; it differs between a numbered screen and a pinned wall. */
+interface DisplayNav {
+  /** Where Escape and "Exit display" go. */
+  exitHash: string;
+  /** Arrow keys: 1 = right, -1 = left. */
+  onArrow: (dir: 1 | -1) => void;
+  /** The rotation timer ran out. */
+  onRotate: () => void;
+}
+
+/** The exit button and the cursor show only while the mouse is moving. */
+function usePointerIdle(): void {
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const onMove = (): void => {
+      document.body.classList.add("pointer");
+      clearTimeout(t);
+      t = setTimeout(() => document.body.classList.remove("pointer"), POINTER_IDLE_MS);
+    };
+    document.addEventListener("mousemove", onMove);
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      clearTimeout(t);
+      document.body.classList.remove("pointer");
+    };
+  }, []);
+}
+
+/** Escape leaves display mode; the arrow keys move along the screens. */
+function useDisplayKeys(nav: Pick<DisplayNav, "exitHash" | "onArrow">): void {
+  const latest = useRef(nav);
+  latest.current = nav;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") go(latest.current.exitHash);
+      if (e.key === "ArrowRight") latest.current.onArrow(1);
+      if (e.key === "ArrowLeft") latest.current.onArrow(-1);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+}
+
+function TvView({ room, wall, live, s, nav }: { room: Room; wall: Wall; live: LiveData; s: StoreState; nav: DisplayNav }) {
   const [vp, setVp] = useState({ w: window.innerWidth, h: window.innerHeight });
   const [now, setNow] = useState(() => new Date());
   const [running, setRunning] = useState(false);
@@ -25,8 +71,12 @@ export function TvView({ room, wall, live, s }: { room: Room; wall: Wall; live: 
   const [, setFontsReady] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
   const index = room.walls.indexOf(wall);
-  const wallIds = room.walls.map((w) => w.id).join("|");
   const rotate = Number(room.rotate) > 0 && room.walls.length > 1 ? Number(room.rotate) : 0;
+  const onRotate = useRef(nav.onRotate);
+  onRotate.current = nav.onRotate;
+
+  usePointerIdle();
+  useDisplayKeys(nav);
 
   useEffect(() => {
     const onResize = (): void => setVp({ w: window.innerWidth, h: window.innerHeight });
@@ -43,46 +93,13 @@ export function TvView({ room, wall, live, s }: { room: Room; wall: Wall; live: 
   useEffect(() => {
     setRunning(false);
     if (!rotate) return;
-    const ids = wallIds.split("|");
-    const next = ids[(ids.indexOf(wall.id) + 1) % ids.length];
     const frame = requestAnimationFrame(() => setRunning(true));
-    const t = setTimeout(() => next && go(`#tv-${next}`), rotate * 1000);
+    const t = setTimeout(() => onRotate.current(), rotate * 1000);
     return () => {
       cancelAnimationFrame(frame);
       clearTimeout(t);
     };
-  }, [wall.id, rotate, wallIds]);
-
-  // The exit button and the cursor show only while the mouse is moving.
-  useEffect(() => {
-    let t: ReturnType<typeof setTimeout> | undefined;
-    const onMove = (): void => {
-      document.body.classList.add("pointer");
-      clearTimeout(t);
-      t = setTimeout(() => document.body.classList.remove("pointer"), POINTER_IDLE_MS);
-    };
-    document.addEventListener("mousemove", onMove);
-    return () => {
-      document.removeEventListener("mousemove", onMove);
-      clearTimeout(t);
-      document.body.classList.remove("pointer");
-    };
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") go(`#wall-${wall.id}`);
-      if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-        const ids = wallIds.split("|");
-        const i = ids.indexOf(wall.id);
-        if (i < 0) return;
-        const next = ids[(i + (e.key === "ArrowRight" ? 1 : -1) + ids.length) % ids.length];
-        if (next) go(`#tv-${next}`);
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [wall.id, wallIds]);
+  }, [wall.id, rotate]);
 
   // Fit: start again from the normal size whenever the wall, the screen or the amount of content changes,
   // then widen the stage while any panel is still cut off. Runs before paint, so the steps are not visible.
@@ -154,10 +171,50 @@ export function TvView({ room, wall, live, s }: { room: Room; wall: Wall; live: 
           </span>
         </div>
       </div>
-      <button type="button" className="btn tv-exit" onClick={() => go(`#wall-${wall.id}`)}>
+      <button type="button" className="btn tv-exit" onClick={() => go(nav.exitHash)}>
         Exit display
       </button>
       <div key={`${wall.id}:${rotate}`} className={`tv-progress${running ? " run" : ""}`} style={{ "--rotate": `${rotate}s` } as CSSProperties} />
     </div>
   );
+}
+
+/** A screen number with no wall behind it: say so quietly, and keep listening for one to arrive. */
+function EmptyScreen({ n, nav }: { n: number; nav: Pick<DisplayNav, "exitHash" | "onArrow"> }) {
+  usePointerIdle();
+  useDisplayKeys(nav);
+  return (
+    <div className="tv-root tv-empty" role="status">
+      <div>
+        <strong>Screen {n}</strong>
+        Nothing is assigned to screen {n} yet.
+      </div>
+      <button type="button" className="btn tv-exit" onClick={() => go(nav.exitHash)}>
+        Exit display
+      </button>
+    </div>
+  );
+}
+
+/** #screen-N: the wall at position N, looked up again on every update, so reordering walls or loading a
+    template changes what the TV shows without anyone touching the TV. Rotation steps through the walls
+    from N without changing the address, so a reload starts at N again. */
+export function ScreenDisplay({ room, n, live, s }: { room: Room; n: number; live: LiveData; s: StoreState }) {
+  const [step, setStep] = useState(0);
+  const count = room.walls.length;
+  const rotating = Number(room.rotate) > 0 && count > 1;
+  const wall = screenWall(room.walls, n, rotating ? step : 0);
+  const onArrow = (dir: 1 | -1): void => go(screenHash(neighbourScreen(n, dir, count)));
+  if (!wall) return <EmptyScreen n={n} nav={{ exitHash: "#overview", onArrow }} />;
+  return <TvView room={room} wall={wall} live={live} s={s} nav={{ exitHash: `#wall-${wall.id}`, onArrow, onRotate: () => setStep((k) => k + 1) }} />;
+}
+
+/** #tv-<wallId>: pinned to one wall wherever it sits. Rotation and the arrow keys move to the next wall's own address. */
+export function PinnedDisplay({ room, wall, live, s }: { room: Room; wall: Wall; live: LiveData; s: StoreState }) {
+  const move = (dir: 1 | -1): void => {
+    const i = room.walls.indexOf(wall);
+    const next = room.walls[(i + dir + room.walls.length) % room.walls.length];
+    if (i >= 0 && next) go(`#tv-${next.id}`);
+  };
+  return <TvView room={room} wall={wall} live={live} s={s} nav={{ exitHash: `#wall-${wall.id}`, onArrow: move, onRotate: () => move(1) }} />;
 }

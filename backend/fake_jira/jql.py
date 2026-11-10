@@ -247,6 +247,8 @@ _GETTERS: dict[str, Callable[[dict], list]] = {
     d.STORY_POINTS: lambda i: [i["points"]],
     "program increment": lambda i: [i["pi"]],
     d.PI_FIELD: lambda i: [i["pi"]],
+    "earned value": lambda i: [],          # a field that exists but that nobody fills in
+    "customfield_10501": lambda i: [],
     "labels": lambda i: i["labels"],
     "assignee": lambda i: [i["assignee"], (i["assignee"] or "").split(" ")[0]],
     "flagged": lambda i: ["Impediment"] if i["flagged"] else [],

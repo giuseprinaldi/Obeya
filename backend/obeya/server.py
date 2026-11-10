@@ -1,7 +1,9 @@
 """HTTP API and static file server, on the standard library.
 
-There is no sign-in here: anyone who can reach the port can edit the room.
-On the VM, put it behind the reverse proxy / SSO that guards the other tools.
+Reading the room is open to anyone who can reach the port, so TVs need no
+sign-in. Editing is open too until a passcode is set in the app (or a sign-in
+proxy is trusted); from then on everything except reading the room needs an
+unlocked browser. See access.py.
 """
 from __future__ import annotations
 
@@ -9,13 +11,17 @@ import hashlib
 import json
 import logging
 import mimetypes
+from dataclasses import dataclass, field
+from email.message import Message
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 from urllib.parse import urlsplit
 
+from .access import AccessControl, AccessError
 from .config import Config
 from .db import Database
+from .diagnostics import run_diagnostics
 from .jira_client import JiraError, JiraUnavailable
 from .flow import clean_blocked_rule
 from .periods import clean_calendar, field_ref
@@ -24,6 +30,13 @@ from .sync import Syncer
 
 log = logging.getLogger("obeya.http")
 MAX_BODY = 2 * 1024 * 1024
+
+
+@dataclass
+class Request:
+    body: Any
+    headers: Mapping[str, str]
+    set_cookies: list = field(default_factory=list)   # Set-Cookie values for the response
 
 
 class ApiError(Exception):
@@ -76,25 +89,67 @@ class App:
         self.cfg = cfg
         self.db = db
         self.syncer = syncer
+        self.access = AccessControl(db, cfg)
+        # Handlers take the request body. The few that need headers or set a cookie take
+        # the whole Request and are listed in self.wants_request.
         self.routes: dict[tuple[str, str], Callable[[Any], Any]] = {
             ("GET", "/api/health"): self.health,
             ("GET", "/api/state"): self.state,
+            ("POST", "/api/unlock"): self.unlock,
+            ("POST", "/api/lock"): self.lock,
+            ("PUT", "/api/passcode"): self.set_passcode,
             ("PUT", "/api/room"): self.save_room,
             ("GET", "/api/settings"): self.get_settings,
             ("PUT", "/api/settings"): self.save_settings,
             ("POST", "/api/sync"): self.sync_now,
             ("GET", "/api/jira/status"): self.jira_status,
+            ("GET", "/api/jira/diagnostics"): self.jira_diagnostics,
             ("GET", "/api/jira/fields"): self.jira_fields,
             ("GET", "/api/jira/boards"): self.jira_boards,
             ("GET", "/api/jira/pi-values"): self.jira_pi_values,
             ("POST", "/api/jira/preview"): self.jira_preview,
         }
+        self.wants_request = {self.state, self.unlock, self.lock, self.set_passcode}
+        # Open to everyone, locked or not. Everything else needs edit rights once locked:
+        # that includes the Jira endpoints, which would otherwise let a visitor run
+        # queries with the service account.
+        self.open_routes = {("GET", "/api/health"), ("GET", "/api/state"),
+                            ("POST", "/api/unlock"), ("POST", "/api/lock")}
 
     def health(self, _body: Any) -> dict:
         self.db.get_room()
         return {"ok": True}
 
-    def state(self, _body: Any) -> dict:
+    def unlock(self, req: Request) -> dict:
+        passcode = req.body.get("passcode") if isinstance(req.body, dict) else None
+        try:
+            req.set_cookies.append(self.access.unlock(passcode, req.headers))
+        except AccessError as err:
+            raise ApiError(err.status, str(err))
+        return {**self.access.describe(req.headers), "canEdit": True}
+
+    def lock(self, req: Request) -> dict:
+        req.set_cookies.append(self.access.clear_cookie(req.headers))
+        without_cookie = Message()   # what this browser will look like once the cookie is gone
+        for name, value in req.headers.items():
+            if name.lower() != "cookie":
+                without_cookie[name] = value
+        return self.access.describe(without_cookie)
+
+    def set_passcode(self, req: Request) -> dict:
+        body = req.body if isinstance(req.body, dict) else {}
+        try:
+            req.set_cookies.append(self.access.set_passcode(body.get("current"), body.get("next"), req.headers))
+        except AccessError as err:
+            raise ApiError(err.status, str(err))
+        described = self.access.describe(req.headers)
+        # The caller keeps editing: the new cookie is on its way with this response.
+        return {**described, "canEdit": True}
+
+    def jira_diagnostics(self, _body: Any) -> dict:
+        return run_diagnostics(self.syncer.client(), self.db.get_settings(), self.cfg.jira_configured)
+
+    def state(self, req: Request) -> dict:
         row = self.db.get_room()
         settings = self.db.get_settings()
         room = row["doc"] if row else None
@@ -105,6 +160,7 @@ class App:
             **self.syncer.results_for(room),
             "periods": self.syncer.periods(settings),
             "sync": self.syncer.status(),
+            "access": self.access.describe(req.headers),
         }
 
     def save_room(self, body: Any) -> dict:
@@ -240,9 +296,14 @@ def make_handler(app: App):
             if handler is None:
                 self._json(404, {"error": "No such endpoint."})
                 return
+            req = Request(None, self.headers)
             try:
-                result = handler(self._body() if method in ("PUT", "POST") else None)
-                self._json(200, result)
+                if method in ("PUT", "POST"):
+                    req.body = self._body()
+                if (method, path) not in app.open_routes and not app.access.describe(self.headers)["canEdit"]:
+                    raise ApiError(401, "Editing is locked. Unlock it to make changes.")
+                result = handler(req) if handler in app.wants_request else handler(req.body)
+                self._json(200, result, req.set_cookies)
             except ApiError as err:
                 self._json(err.status, {"error": str(err), **err.extra})
             except JiraUnavailable as err:
@@ -257,19 +318,26 @@ def make_handler(app: App):
             try:
                 length = int(self.headers.get("Content-Length") or 0)
             except ValueError:
+                self.close_connection = True
                 raise ApiError(400, "Bad Content-Length.")
             if length > MAX_BODY:
                 self.close_connection = True
                 raise ApiError(413, "That is too large to save.")
-            if length == 0:
+            raw = self.rfile.read(length) if length else b""
+            # Only JSON is accepted. A form on another website cannot send JSON without the
+            # browser asking this server first, which it never allows, so this (with the
+            # SameSite cookie) is what stops another site from acting as an unlocked user.
+            ctype = str(self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if ctype != "application/json":
+                raise ApiError(415, "Send JSON (Content-Type: application/json).")
+            if not raw:
                 return None
-            raw = self.rfile.read(length)
             try:
                 return json.loads(raw.decode("utf-8"))
             except (ValueError, UnicodeDecodeError):
                 raise ApiError(400, "The request body is not valid JSON.")
 
-        def _json(self, status: int, payload: Any) -> None:
+        def _json(self, status: int, payload: Any, cookies: Optional[list] = None) -> None:
             body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
             etag = '"' + hashlib.sha1(body).hexdigest()[:20] + '"'
             if status == 200 and self.command == "GET" and self.headers.get("If-None-Match") == etag:
@@ -283,6 +351,8 @@ def make_handler(app: App):
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-cache")
             self.send_header("X-Content-Type-Options", "nosniff")
+            for cookie in cookies or []:
+                self.send_header("Set-Cookie", cookie)
             if status == 200 and self.command == "GET":
                 self.send_header("ETag", etag)
             self.end_headers()

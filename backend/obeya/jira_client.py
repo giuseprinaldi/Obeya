@@ -119,6 +119,10 @@ class JiraClient:
     def server_info(self) -> dict:
         return self._request("GET", "/rest/api/2/serverInfo") or {}
 
+    def myself(self) -> dict:
+        """The account the token belongs to. Unlike serverInfo, this needs a valid token."""
+        return self._request("GET", "/rest/api/2/myself") or {}
+
     def is_cloud(self) -> bool:
         if self._deployment is None:
             info = self.server_info()

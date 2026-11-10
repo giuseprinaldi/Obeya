@@ -16,11 +16,18 @@ DEFAULT_TOKEN = "fake-token"
 
 
 def make_fake_server(host: str = "127.0.0.1", port: int = 8790, token: str = DEFAULT_TOKEN,
-                     today: Optional[date] = None, parent_link_shape: str = "key") -> ThreadingHTTPServer:
-    """parent_link_shape: "key" returns the Parent Link as an issue key;
-    "opaque" returns an object with no usable reference, to exercise the
-    one-parent-at-a-time fallback."""
+                     today: Optional[date] = None, parent_link_shape: str = "key",
+                     hide_fields: tuple = (), changelog: bool = True) -> ThreadingHTTPServer:
+    """Options that imitate the ways real Jira instances differ:
+
+    parent_link_shape  "key" returns the Parent Link as an issue key; "opaque" returns
+                       an object with no usable reference.
+    hide_fields        field ids this instance does not have (left out of the field
+                       list and of every issue).
+    changelog          False = searches ignore expand=changelog.
+    """
     dataset = Dataset(today)
+    hidden = set(hide_fields)
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -52,8 +59,10 @@ def make_fake_server(host: str = "127.0.0.1", port: int = 8790, token: str = DEF
             if method == "GET" and path == "/rest/api/2/serverInfo":
                 self._send(200, {"baseUrl": self._base(), "version": "9.12.4", "deploymentType": "Server",
                                  "serverTitle": "Fake Jira"})
+            elif method == "GET" and path == "/rest/api/2/myself":
+                self._send(200, {"name": "svc-obeya", "displayName": "Obeya service account", "active": True})
             elif method == "GET" and path == "/rest/api/2/field":
-                self._send(200, FIELDS)
+                self._send(200, [f for f in FIELDS if f["id"] not in hidden])
             elif method == "GET" and path == "/rest/api/2/status":
                 self._send(200, [status_json(name) for name in STATUSES])
             elif path == "/rest/api/2/search":
@@ -100,7 +109,9 @@ def make_fake_server(host: str = "127.0.0.1", port: int = 8790, token: str = DEF
                 expand = ",".join(expand)
             page = []
             for issue in matches[start:start + size]:
-                item = dataset.to_json(issue, self._base(), fields, changelog="changelog" in expand)
+                item = dataset.to_json(issue, self._base(), fields, changelog=changelog and "changelog" in expand)
+                for name in hidden:
+                    item["fields"].pop(name, None)
                 if parent_link_shape == "opaque":
                     for name, value in item["fields"].items():
                         if name == "customfield_10102" and value:

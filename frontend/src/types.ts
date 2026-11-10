@@ -419,6 +419,18 @@ export interface SyncInfo {
   intervalSeconds: number;
 }
 
+/** Who may edit. Screens and visitors are view-only whenever `locked` is true. */
+export interface Access {
+  /** Editing needs unlocking: a passcode is set, or the server only trusts signed-in editors. */
+  locked: boolean;
+  /** This browser may edit right now. Always true when `locked` is false. */
+  canEdit: boolean;
+  /** A passcode exists (so Customize offers "change" and "remove" rather than "set"). */
+  passcodeSet: boolean;
+  /** Name passed on by the sign-in proxy, when the server is set up to trust one. */
+  user: string | null;
+}
+
 /** GET /api/state */
 export interface ServerState {
   /** Null until the first save; the frontend then seeds a room and saves it. */
@@ -435,6 +447,42 @@ export interface ServerState {
   metrics: Record<string, MetricResult>;
   periods: Periods;
   sync: SyncInfo;
+  /** Absent on an older server: treat as unlocked. */
+  access: Access;
+}
+
+/** POST /api/unlock body. 200 -> Access (and a session cookie); 403 wrong passcode;
+    429 too many wrong attempts. */
+export interface UnlockRequest {
+  passcode: string;
+}
+
+/** PUT /api/passcode body -> Access. Sets the first passcode (current ""), changes it, or
+    removes it (next ""). 400 when next is shorter than 6 characters; 403 when current is wrong. */
+export interface PasscodeRequest {
+  current: string;
+  next: string;
+}
+
+/** One line of GET /api/jira/diagnostics. */
+export interface DiagnosticCheck {
+  id: string;
+  /** What was checked, e.g. "Token accepted". */
+  label: string;
+  /** skip = not run because an earlier check failed. */
+  status: "pass" | "warn" | "fail" | "skip";
+  /** What was found. */
+  detail: string;
+  /** What to do about a warn or fail. "" when there is nothing to do. */
+  fix: string;
+}
+
+/** GET /api/jira/diagnostics */
+export interface Diagnostics {
+  /** No check failed (warnings allowed). */
+  ok: boolean;
+  ranAt: string;
+  checks: DiagnosticCheck[];
 }
 
 /** PUT /api/room body. */
@@ -527,7 +575,9 @@ export interface SyncResponse {
   durationMs: number;
 }
 
-/** Every non-2xx response body. */
+/** Every non-2xx response body. A 401 means editing is locked for this browser: every
+    endpoint except GET /api/state, GET /api/health, POST /api/unlock and POST /api/lock
+    answers 401 until it is unlocked. */
 export interface ApiError {
   error: string;
 }

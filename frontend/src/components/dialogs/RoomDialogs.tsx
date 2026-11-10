@@ -1,12 +1,14 @@
 /* Wall settings, add wall, and the room-wide Customize dialog. */
 import { useId, useState } from "react";
+import { copyText } from "../../clipboard";
 import { normalizeRoom } from "../../logic/normalize";
 import { ACCENTS, LIBRARY, TEMPLATES, buildWall, seed } from "../../logic/seed";
 import { uid } from "../../logic/util";
-import { store } from "../../store";
+import { store, useStore } from "../../store";
 import type { AccentKey, Room, Theme, Wall } from "../../types";
 import { go } from "../../ui";
 import { Dialog, SelectField, TextArea, TextField } from "../Dialog";
+import { PasscodeSection } from "./AccessDialogs";
 
 export function WallSettingsDialog({ room, wall, onClose }: { room: Room; wall: Wall; onClose: () => void }) {
   const index = room.walls.findIndex((w) => w.id === wall.id);
@@ -44,7 +46,7 @@ export function WallSettingsDialog({ room, wall, onClose }: { room: Room; wall: 
         value={pos}
         onChange={setPos}
         options={room.walls.map((_, n) => [String(n), `Screen ${n + 1}`] as const)}
-        hint="Screens are numbered left to right around the room."
+        hint="Screens are numbered left to right around the room. TVs follow the screen number, so moving a wall to another screen changes which TV shows it."
       />
     </Dialog>
   );
@@ -95,6 +97,7 @@ export function CustomizeDialog({ room, onClose }: { room: Room; onClose: () => 
   const [json, setJson] = useState("");
   const [msg, setMsg] = useState("");
   const accentName = useId();
+  const { access } = useStore();
 
   const save = (): void => {
     store.commit(
@@ -123,12 +126,7 @@ export function CustomizeDialog({ room, onClose }: { room: Room; onClose: () => 
   const copy = async (): Promise<void> => {
     const textToCopy = json || current();
     if (!json) setJson(textToCopy);
-    try {
-      await navigator.clipboard.writeText(textToCopy);
-      setMsg("Copied.");
-    } catch {
-      setMsg("Copy was blocked. Select the text and press Ctrl+C.");
-    }
+    setMsg((await copyText(textToCopy)) ? "Copied." : "Copy was blocked. Select the text and press Ctrl+C.");
   };
 
   const importJson = (): void => {
@@ -214,6 +212,7 @@ export function CustomizeDialog({ room, onClose }: { room: Room; onClose: () => 
         </div>
         <span className="hint">Backups from the earlier single-file prototype can be imported too.</span>
       </div>
+      <PasscodeSection access={access} />
     </Dialog>
   );
 }

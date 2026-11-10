@@ -1,12 +1,21 @@
 // Dev-only stand-in for the Python API, so the UI can be exercised without the backend.
-// Not part of the build. Usage: node dev/mock-server.mjs [port]   (default 8799)
+// Not part of the build. Usage: node dev/mock-server.mjs [port] [locked]   (default port 8799)
+// Edit lock: start with the word "locked" as an argument, or OBEYA_LOCKED=1, and the room needs the
+// passcode "obeya-test" before it can be edited. Without it the room is open until a passcode is set
+// in Customize. Five wrong passcodes in a row answer 429 for 30 seconds.
 // Then: OBEYA_API=http://localhost:8799 npm run dev
 // State lives in memory. Jira answers are invented from the issue key.
 // Invented on purpose, so every state can be seen: board 1 has a blocked card, a column over its WIP limit and a
 // column with "+N more"; a cycle_time KPI has nothing to measure; an unplanned KPI fails; board 404 fails.
 import { createServer } from "node:http";
 
-const port = Number(process.argv[2]) || 8799;
+const args = process.argv.slice(2);
+const port = Number(args.find((a) => /^\d+$/.test(a))) || 8799;
+let passcode = args.includes("locked") || process.env.OBEYA_LOCKED === "1" ? "obeya-test" : "";
+const sessions = new Set();
+let wrong = 0, blockedUntil = 0;
+const COOKIE = "obeya_mock_edit";
+const OPEN_WHEN_LOCKED = new Set(["GET /api/state", "GET /api/health", "POST /api/unlock", "POST /api/lock"]);
 const iso = (d) => d.toISOString().slice(0, 10);
 const day = (n) => iso(new Date(Date.now() + n * 86400000));
 
@@ -113,14 +122,67 @@ function state() {
   };
 }
 
+const sessionOf = (req) => (req.headers.cookie ?? "").split(/;\s*/).map((c) => c.split("=")).find(([k]) => k === COOKIE)?.[1] ?? "";
+const unlocked = (req) => sessions.has(sessionOf(req));
+const accessFor = (canEdit) => ({ locked: passcode !== "", canEdit: passcode === "" || canEdit, passcodeSet: passcode !== "", user: null });
+
+// One check of each kind, so every row style can be seen.
+const diagnostics = () => ({
+  ok: false,
+  ranAt: new Date().toISOString(),
+  checks: [
+    { id: "reach", label: "Jira can be reached", status: "pass", detail: "https://jira.example answered in 180 ms.", fix: "" },
+    { id: "token", label: "Token accepted", status: "pass", detail: "Signed in as svc-obeya.", fix: "" },
+    { id: "version", label: "Jira version", status: "warn", detail: "Jira Server 8.5 is older than the versions this was tested on.", fix: "It should still work. Tell whoever looks after Jira if boards come back empty." },
+    { id: "pi-field", label: "PI field", status: "fail", detail: "The field customfield_10500 does not exist in this Jira.", fix: "Pick the PI field again in the Fields section below." },
+    { id: "pi-values", label: "PI field has values", status: "skip", detail: "Not run because the PI field check failed.", fix: "" },
+  ],
+});
+
 const read = (req) => new Promise((ok) => { let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => ok(b ? JSON.parse(b) : null)); });
 
 createServer(async (req, res) => {
-  const send = (code, body) => { res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify(body)); };
+  const send = (code, body, headers = {}) => { res.writeHead(code, { "Content-Type": "application/json", ...headers }); res.end(JSON.stringify(body)); };
   const route = `${req.method} ${req.url.split("?")[0]}`;
   try {
+    // The real server only takes JSON on PUT and POST, and answers 401 to everything but these four while locked.
+    if (req.method !== "GET" && !/^application\/json\b/.test(req.headers["content-type"] ?? "")) return send(415, { error: "Send JSON: Content-Type must be application/json." });
+    const canEdit = passcode === "" || unlocked(req);
+    if (!canEdit && !OPEN_WHEN_LOCKED.has(route)) return send(401, { error: "Editing is locked." });
     switch (route) {
-      case "GET /api/state": return send(200, state());
+      case "GET /api/state": return send(200, { ...state(), access: accessFor(canEdit) });
+      case "GET /api/health": return send(200, { ok: true });
+      case "POST /api/unlock": {
+        const body = await read(req);
+        if (Date.now() < blockedUntil) return send(429, { error: "Too many wrong passcodes. Wait half a minute and try again." });
+        if (passcode !== "" && body?.passcode !== passcode) {
+          if (++wrong >= 5) { wrong = 0; blockedUntil = Date.now() + 30000; }
+          return send(403, { error: "That passcode is not right." });
+        }
+        wrong = 0;
+        const id = Math.random().toString(36).slice(2);
+        sessions.add(id);
+        return send(200, accessFor(true), { "Set-Cookie": `${COOKIE}=${id}; Path=/; HttpOnly; SameSite=Lax` });
+      }
+      case "POST /api/lock":
+        sessions.delete(sessionOf(req));
+        return send(200, accessFor(false), { "Set-Cookie": `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0` });
+      case "PUT /api/passcode": {
+        const body = await read(req);
+        if ((body?.current ?? "") !== passcode) return send(403, { error: "The current passcode is not right." });
+        const next = String(body?.next ?? "");
+        if (next !== "" && next.length < 6) return send(400, { error: "A passcode needs at least 6 characters." });
+        passcode = next;
+        if (next === "") { sessions.clear(); return send(200, accessFor(true)); }
+        // Whoever set the passcode stays unlocked; everyone else has to unlock.
+        const id = Math.random().toString(36).slice(2);
+        sessions.clear();
+        sessions.add(id);
+        return send(200, accessFor(true), { "Set-Cookie": `${COOKIE}=${id}; Path=/; HttpOnly; SameSite=Lax` });
+      }
+      case "GET /api/jira/diagnostics":
+        await new Promise((ok) => setTimeout(ok, 1200));
+        return send(200, diagnostics());
       case "PUT /api/room": {
         const body = await read(req);
         if (body.baseVersion !== version) return send(409, { error: "conflict", version, room });
@@ -146,4 +208,4 @@ createServer(async (req, res) => {
   } catch (e) {
     send(500, { error: String(e) });
   }
-}).listen(port, () => console.log(`Mock Obeya API on http://localhost:${port}`));
+}).listen(port, () => console.log(`Mock Obeya API on http://localhost:${port}${passcode ? ' (locked, passcode "obeya-test")' : ""}`));

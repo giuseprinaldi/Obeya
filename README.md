@@ -20,7 +20,7 @@ A configurable digital Obeya room for leadership and program management. Each wa
   - Problem solving: problems moving through Define, Analyze, Countermeasure, Verify and Closed
   - Action tracker: owner, due date and done, with late actions flagged
   - Flow board: columns with WIP limits and drag-and-drop cards, or a live read-only view of a Jira board
-- **Display mode** (`#tv-<wall-id>`): a dark theme that scales to fill the screen, with a clock, the current PI and sprint, and an "updated" stamp. Controls and the mouse cursor hide when the mouse is idle. The arrow keys switch walls and Escape exits. Screens can be set to rotate when there are fewer TVs than walls.
+- **Display mode** (`#screen-N`): a dark theme that scales to fill the screen, with a clock, the current PI and sprint, and an "updated" stamp. Controls and the mouse cursor hide when the mouse is idle. The arrow keys switch walls and Escape exits. Screens can be set to rotate when there are fewer TVs than walls.
 - **Status encoding:** colored stripes and labels for KPIs off target, initiatives at risk, blocked work, columns over their WIP limit, high-severity problems, late actions and bars behind pace.
 - **Customize:** room name, accent color, separate themes for laptops and TVs, density, three room templates (Program, Leadership, Team delivery) and a JSON backup and import.
 
@@ -46,6 +46,12 @@ To keep sprint and PI changes hands-off:
 - PI queries use `{PI}` and `{PI_FIELD}`, filled in from a PI calendar entered once under **Jira** in the app. When the date passes into the next PI, the bars follow.
 - Links, the PI field, the board and the calendar are all set in the app. None of them need a code or config change.
 
+## Locking edits and setting up TVs
+
+- **Edit passcode.** Under **Customize** you can set a passcode. After that, TVs and visitors can look but not change anything, and editing needs the passcode once per browser. If it is forgotten, `python -m obeya reset-passcode` on the server removes it.
+- **Screen addresses.** Each TV opens `/#screen-1`, `/#screen-2` and so on. A TV follows its screen number, so reordering walls or loading a template changes what it shows without touching it.
+- **Jira connection check.** **Jira** > **Check the connection** tests the real Jira against everything the app relies on and says what to fix. `python -m obeya check` does the same from the server.
+
 ## Running it locally
 
 Requirements: Python 3.10+ and Node 20+. The backend needs no packages installed.
@@ -57,7 +63,7 @@ cd backend && python scripts/dev.py
 
 Open http://127.0.0.1:8787. `scripts/dev.py` starts the server together with the fake Jira (sample keys: `PLAT-1`, `DATA-1`) and fills in matching Jira settings on the first run.
 
-To try a TV, open a second tab on `#tv-<wall-id>`, or use **Open display** on any wall. Everything in the starter room is example data.
+To try a TV, open a second tab on `#screen-1`, or use **Open display** on any wall. Everything in the starter room is example data.
 
 For frontend work, run `npm run dev` in `frontend/` alongside the server; it proxies `/api` to port 8787.
 
@@ -87,7 +93,7 @@ cd frontend && npm test
 
 1. Deploy to the VM and check the Jira calls against the real instance.
 2. GitLab metrics.
-3. Add sign-in, or place the app behind the existing proxy.
+3. Per-user sign-in, if the passcode or the existing proxy is not enough.
 4. Keep strategy, problems and actions as manual entries, since those need human judgment.
 
 ## License
