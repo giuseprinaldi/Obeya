@@ -6,7 +6,7 @@ import { normalizeRoom } from "./logic/normalize";
 import type { LiveData } from "./logic/progress";
 import { seed } from "./logic/seed";
 import { todayISO } from "./logic/util";
-import type { AutoResult, Periods, ProgressResult, Room, ServerState, SyncInfo } from "./types";
+import type { AutoResult, BoardResult, MetricResult, Periods, ProgressResult, Room, ServerState, SyncInfo } from "./types";
 
 export interface StoreState {
   /** False until the first answer from the server. */
@@ -18,6 +18,8 @@ export interface StoreState {
   updatedAt: string | null;
   progress: Record<string, ProgressResult>;
   auto: Record<string, AutoResult>;
+  boards: Record<string, BoardResult>;
+  metrics: Record<string, MetricResult>;
   periods: Periods;
   sync: SyncInfo;
   /** "retrying" means an edit has not reached the server yet. */
@@ -35,6 +37,8 @@ let state: StoreState = {
   updatedAt: null,
   progress: {},
   auto: {},
+  boards: {},
+  metrics: {},
   periods: { today: todayISO(), pi: null, nextPi: null, sprint: null },
   sync: { jiraConfigured: false, running: false, lastRunAt: null, lastOk: null, lastError: null, intervalSeconds: 300 },
   saveState: "idle",
@@ -74,6 +78,9 @@ function applyServer(s: ServerState, seqAtStart: number, force: boolean): void {
     offlineSince: null,
     progress: s.progress ?? {},
     auto: s.auto ?? {},
+    // An older server sends neither of these.
+    boards: s.boards ?? {},
+    metrics: s.metrics ?? {},
     periods: s.periods ?? state.periods,
     sync: s.sync ?? state.sync,
   };
@@ -244,5 +251,5 @@ export function useStore(): StoreState {
 
 /** The live Jira data in the shape the status and progress rules take. */
 export function liveOf(s: StoreState): LiveData {
-  return { progress: s.progress, auto: s.auto, periods: s.periods, jiraConfigured: s.sync.jiraConfigured };
+  return { progress: s.progress, auto: s.auto, boards: s.boards, metrics: s.metrics, periods: s.periods, jiraConfigured: s.sync.jiraConfigured };
 }

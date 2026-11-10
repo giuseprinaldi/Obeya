@@ -1,10 +1,11 @@
 /* Form parts shared by every editor that links something to Jira. */
 import { useEffect, useState } from "react";
-import { api, errorText } from "../../api";
+import { api, errorText, type PreviewResult } from "../../api";
+import { describeBoard } from "../../logic/board";
 import { JQL_HINT, JQL_PRESETS, parseIssueKey, parseStatusList } from "../../logic/jira";
 import { defaultJiraOptions } from "../../logic/progress";
 import { dayNumber, fmtNum } from "../../logic/util";
-import type { AutoResult, BarColor, BarDisplay, JiraSource, JiraSourceOptions, Measure, PreviewRequest, ProgressResult, ValueFormat } from "../../types";
+import type { AutoResult, BarColor, BarDisplay, JiraBoard, JiraSource, JiraSourceOptions, Measure, MetricResult, PreviewRequest, ProgressResult, ValueFormat } from "../../types";
 import { CheckField, SelectField, TextArea, TextField } from "../Dialog";
 
 /* ---------- Draft of a Jira link, as typed into the form ---------- */
@@ -55,13 +56,22 @@ export function linkSource(d: LinkDraft): JiraSource | string {
 
 /* ---------- Fields ---------- */
 
-export function JqlInput({ value, onChange, label = "Jira query (JQL)" }: { value: string; onChange: (v: string) => void; label?: string }) {
+interface JqlInputProps {
+  value: string;
+  onChange: (v: string) => void;
+  label?: string;
+  /** Buttons that fill the query in. Defaults to the presets for progress bars. */
+  presets?: { label: string; jql: string }[];
+  placeholder?: string;
+}
+
+export function JqlInput({ value, onChange, label = "Jira query (JQL)", presets = JQL_PRESETS, placeholder = 'project = PLAT AND issuetype = Epic AND {PI_FIELD} = "{PI}"' }: JqlInputProps) {
   return (
     <>
-      <TextArea label={label} value={value} onChange={onChange} rows={2} code hint={JQL_HINT} placeholder='project = PLAT AND issuetype = Epic AND {PI_FIELD} = "{PI}"' />
+      <TextArea label={label} value={value} onChange={onChange} rows={2} code hint={JQL_HINT} placeholder={placeholder} />
       <div className="btn-row">
         <span className="hint">Start from:</span>
-        {JQL_PRESETS.map((p) => (
+        {presets.map((p) => (
           <button key={p.label} type="button" className="btn small" onClick={() => onChange(p.jql)}>
             {p.label}
           </button>
@@ -137,8 +147,29 @@ function describeAuto(r: AutoResult): string {
   return `It would add ${n} ${n === 1 ? "bar" : "bars"}${r.truncated ? " (more issues match than the limit allows)" : ""}${names ? `: ${names}${n > 4 ? "…" : ""}` : "."}`;
 }
 
+function describeMetric(r: MetricResult): string {
+  if (r.value === null || r.value === undefined) return `Nothing to measure yet${r.detail ? `: ${r.detail}` : "."}`;
+  return `${fmtNum(r.value)}${r.unit ? ` ${r.unit}` : ""}${r.detail ? `: ${r.detail}` : "."}`;
+}
+
+/** One line for whatever a preview returned; which kind it is follows from what was asked. */
+function describeResult(asked: PreviewRequest, r: PreviewResult): string {
+  if (asked.board && "columns" in r) return describeBoard(asked.board, r);
+  if (asked.metric && "detail" in r) return describeMetric(r);
+  if ("bars" in r) return describeAuto(r);
+  if ("done" in r) return describe(r);
+  return "Jira answered, but not in a form this page understands.";
+}
+
+interface CheckLinkProps {
+  build: () => PreviewRequest | string;
+  label?: string;
+  /** Called with a successful answer, for editors that use it (the board editor lists its columns). */
+  onResult?: (r: PreviewResult) => void;
+}
+
 /** "Check link": asks the server what the link resolves to right now and shows the answer inline. */
-export function CheckLink({ build, label = "Check link" }: { build: () => PreviewRequest | string; label?: string }) {
+export function CheckLink({ build, label = "Check link", onResult }: CheckLinkProps) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const built = build();
@@ -151,7 +182,10 @@ export function CheckLink({ build, label = "Check link" }: { build: () => Previe
     try {
       const r = await api.preview(built);
       if (!r.ok) setResult({ ok: false, text: r.error || "Jira could not read this link." });
-      else setResult({ ok: true, text: "bars" in r ? describeAuto(r) : describe(r) });
+      else {
+        setResult({ ok: true, text: describeResult(built, r) });
+        onResult?.(r);
+      }
     } catch (e) {
       setResult({ ok: false, text: errorText(e) });
     } finally {
@@ -174,6 +208,45 @@ export function CheckLink({ build, label = "Check link" }: { build: () => Previe
       ) : null}
     </>
   );
+}
+
+/* ---------- Jira boards ---------- */
+
+/** The boards Jira offers, loaded once. `error` says why the list is empty when it could not be read. */
+export function useBoards(): { boards: JiraBoard[]; loaded: boolean; error: string } {
+  const [state, setState] = useState<{ boards: JiraBoard[]; loaded: boolean; error: string }>({ boards: [], loaded: false, error: "" });
+  useEffect(() => {
+    let live = true;
+    api.jiraBoards().then(
+      (v) => live && setState({ boards: Array.isArray(v) ? v : [], loaded: true, error: "" }),
+      (e: unknown) => live && setState({ boards: [], loaded: true, error: errorText(e) }),
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  return state;
+}
+
+interface BoardPickerProps {
+  label: string;
+  value: number | null;
+  onChange: (v: number | null) => void;
+  boards: JiraBoard[];
+  /** The first option, for "no board". */
+  emptyLabel: string;
+  hint?: string;
+}
+
+/** A board select. A board that is saved but not in the list (Jira unreachable) still shows, as "Board 12". */
+export function BoardPicker({ label, value, onChange, boards, emptyLabel, hint }: BoardPickerProps) {
+  const known = value === null || boards.some((b) => b.id === value);
+  const options: (readonly [string, string])[] = [
+    ["", emptyLabel],
+    ...(known ? [] : [[String(value), `Board ${value}`] as const]),
+    ...boards.map((b) => [String(b.id), `${b.name} (${b.type})`] as const),
+  ];
+  return <SelectField label={label} value={value === null ? "" : String(value)} onChange={(v) => onChange(v === "" ? null : Number(v))} options={options} hint={hint} />;
 }
 
 /* ---------- How a bar is drawn ---------- */

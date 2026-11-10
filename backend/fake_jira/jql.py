@@ -2,12 +2,13 @@
 and the ones a user is likely to type into a bar.
 
 Supports AND / OR / NOT, parentheses, =, !=, ~, IN, NOT IN, IS [NOT] EMPTY,
-openSprints() / closedSprints() / futureSprints(), cf[12345] and ORDER BY
-(accepted and ignored). Unknown fields fail the way Jira does, with a 400.
+date comparisons (updated >= -30d, resolved > "2026-11-01"), openSprints() /
+closedSprints() / futureSprints(), cf[12345] and ORDER BY (accepted and ignored). Unknown fields fail the way Jira does, with a 400.
 """
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 
 from . import data as d
@@ -20,8 +21,8 @@ class JqlError(Exception):
 _TOKEN = re.compile(r"""
     \s*(?:
         (?P<str>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')
-      | (?P<op>!=|!~|=|~|\(|\)|,)
-      | (?P<word>cf\[\d+\]|[^\s()=!~,"']+)
+      | (?P<op>!=|!~|>=|<=|=|~|>|<|\(|\)|,)
+      | (?P<word>cf\[\d+\]|[^\s()=!~<>,"']+)
     )""", re.X)
 
 
@@ -120,6 +121,8 @@ class Parser:
         if t is None or t[0] == "op":
             raise JqlError("Error in the JQL Query: expecting a field name.")
         self.i += 1
+        if t[1].strip().casefold() in _DATE_FIELDS:
+            return self._date_clause(t[1])
         getter = self._field(t[1])
         if self._kw("IS", "NOT", "EMPTY") or self._kw("IS", "NOT", "NULL"):
             return lambda issue: bool(getter(issue))
@@ -143,6 +146,35 @@ class Parser:
         if negate:
             return lambda issue: not (getter(issue) & wanted)
         return lambda issue: bool(getter(issue) & wanted)
+
+    def _date_clause(self, name: str) -> Predicate:
+        getter = _DATE_FIELDS[name.strip().casefold()]
+        if self._kw("IS", "NOT", "EMPTY"):
+            return lambda issue: getter(self.ds, issue) is not None
+        if self._kw("IS", "EMPTY"):
+            return lambda issue: getter(self.ds, issue) is None
+        op = next((o for o in (">=", "<=", ">", "<", "=") if self._op(o)), None)
+        if op is None:
+            raise JqlError(f"Error in the JQL Query: expecting an operator after '{name}'.")
+        t = self._peek()
+        if t is None or t[0] == "op":
+            raise JqlError("Error in the JQL Query: expecting a value.")
+        self.i += 1
+        limit = self._when(t[1], name)
+        compare = {">=": lambda a: a >= limit, "<=": lambda a: a <= limit, ">": lambda a: a > limit,
+                   "<": lambda a: a < limit, "=": lambda a: a.date() == limit.date()}[op]
+        return lambda issue: (v := getter(self.ds, issue)) is not None and compare(v)
+
+    def _when(self, text: str, field: str) -> datetime:
+        """-30d, -2w, 4h, or an ISO date."""
+        m = re.fullmatch(r"([+-]?\d+)([mhdw])", text.strip())
+        if m:
+            unit = {"m": "minutes", "h": "hours", "d": "days", "w": "weeks"}[m.group(2)]
+            return self.ds.now + timedelta(**{unit: int(m.group(1))})
+        try:
+            return datetime.fromisoformat(text.strip().replace("/", "-")).replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise JqlError(f"Date value '{text}' for field '{field}' is invalid.")
 
     def _list(self, field: str) -> list[str]:
         t = self._peek()
@@ -215,6 +247,17 @@ _GETTERS: dict[str, Callable[[dict], list]] = {
     d.STORY_POINTS: lambda i: [i["points"]],
     "program increment": lambda i: [i["pi"]],
     d.PI_FIELD: lambda i: [i["pi"]],
+    "labels": lambda i: i["labels"],
+    "assignee": lambda i: [i["assignee"], (i["assignee"] or "").split(" ")[0]],
+    "flagged": lambda i: ["Impediment"] if i["flagged"] else [],
+    d.FLAGGED: lambda i: ["Impediment"] if i["flagged"] else [],
+}
+
+_DATE_FIELDS: dict[str, Callable[[Any, dict], Optional[datetime]]] = {
+    "created": lambda ds, i: i["created"],
+    "updated": lambda ds, i: ds.updated(i),
+    "resolved": lambda ds, i: i["resolved"],
+    "resolutiondate": lambda ds, i: i["resolved"],
 }
 
 

@@ -1,17 +1,10 @@
 /* Status rules: what counts as off target, late, blocked or behind, and how that rolls up. */
-import type { ActionItem, KpiItem, Panel, Status } from "../types";
+import type { ActionItem, Panel, Status } from "../types";
+import { boardView } from "./board";
+import { effectiveKpi } from "./kpi";
 import { resolveBars, type LiveData } from "./progress";
 
-export function kpiStatus(k: KpiItem): Status {
-  const a = Number(k.actual), t = Number(k.target);
-  if (k.actual === "" || k.actual == null || k.target === "" || k.target == null || !isFinite(a) || !isFinite(t)) return "none";
-  if (k.dir === "down") {
-    if (a <= t) return "good";
-    return (t === 0 ? a <= 1 : a <= t * 1.1) ? "warn" : "bad";
-  }
-  if (a >= t) return "good";
-  return a >= t * 0.9 ? "warn" : "bad";
-}
+export { kpiStatus } from "./kpi";
 
 export const isLate = (a: ActionItem, today: string): boolean => !a.done && !!a.due && a.due < today;
 
@@ -29,25 +22,35 @@ export interface Signals {
   barBad: number;
   /** Progress bars at risk of falling behind. */
   barWarn: number;
-  /** Jira links that failed. */
-  barError: number;
+  /** Jira links that failed: bars, panel queries, Jira KPIs and Jira boards. */
+  jiraFailing: number;
   items: number;
 }
 
 export function signals(panels: Panel[], live: LiveData): Signals {
-  const s: Signals = { kpiBad: 0, kpiWarn: 0, blocked: 0, overWip: 0, late: 0, openHigh: 0, open: 0, off: 0, risk: 0, barBad: 0, barWarn: 0, barError: 0, items: 0 };
+  const s: Signals = { kpiBad: 0, kpiWarn: 0, blocked: 0, overWip: 0, late: 0, openHigh: 0, open: 0, off: 0, risk: 0, barBad: 0, barWarn: 0, jiraFailing: 0, items: 0 };
   const today = live.periods.today;
   for (const p of panels) {
     switch (p.type) {
       case "kpi":
         for (const k of p.data.items) {
           s.items++;
-          const st = kpiStatus(k);
-          if (st === "bad") s.kpiBad++;
-          else if (st === "warn") s.kpiWarn++;
+          const e = effectiveKpi(k, live);
+          if (e.state === "error") s.jiraFailing++;
+          if (e.status === "bad") s.kpiBad++;
+          else if (e.status === "warn") s.kpiWarn++;
         }
         break;
       case "kanban": {
+        const board = boardView(p, live);
+        if (board) {
+          // A Jira-fed board feeds the same counters as a manual one.
+          if (board.state === "error") s.jiraFailing++;
+          s.items += board.total;
+          s.blocked += board.blocked;
+          s.overWip += board.overWip;
+          break;
+        }
         const cols = p.data.columns;
         const last = cols.length ? cols[cols.length - 1]!.id : null;
         for (const c of p.data.cards) {
@@ -83,9 +86,9 @@ export function signals(panels: Panel[], live: LiveData): Signals {
         break;
       case "progress": {
         const r = resolveBars(p, live);
-        if (r.autoFailed) s.barError++;
+        if (r.autoFailed) s.jiraFailing++;
         for (const b of r.bars) {
-          if (b.state === "error") s.barError++;
+          if (b.state === "error") s.jiraFailing++;
           if (b.state !== "ok") continue;
           s.items++;
           if (b.status === "bad") s.barBad++;
@@ -104,7 +107,7 @@ export function signals(panels: Panel[], live: LiveData): Signals {
 export const badCount = (s: Signals): number => s.kpiBad + s.blocked + s.late + s.openHigh + s.off + s.barBad;
 
 /** Things to watch on a wall's screen in the room plan. */
-export const watchCount = (s: Signals): number => s.kpiWarn + s.risk + s.overWip + s.barWarn + s.barError;
+export const watchCount = (s: Signals): number => s.kpiWarn + s.risk + s.overWip + s.barWarn + s.jiraFailing;
 
 export function panelStatus(p: Panel, live: LiveData): Status {
   if (p.type === "statement") return "none";
@@ -137,7 +140,7 @@ export function chipList(s: Signals): Chip[] {
   add(s.kpiWarn, "near target", "warn");
   add(s.risk + s.barWarn, "at risk", "warn");
   add(s.overWip, "over WIP", "warn");
-  add(s.barError, s.barError > 1 ? "Jira links failing" : "Jira link failing", "warn");
+  add(s.jiraFailing, s.jiraFailing > 1 ? "Jira links failing" : "Jira link failing", "warn");
   if (!out.length) out.push({ text: "All clear", status: "good" });
   return out;
 }

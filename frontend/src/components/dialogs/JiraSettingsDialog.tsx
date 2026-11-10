@@ -1,11 +1,12 @@
 /* Jira settings: connection status, which fields mean what, and the PI calendar. */
 import { useEffect, useId, useMemo, useState } from "react";
 import { api, errorText } from "../../api";
+import { parseStatusList, withSettingsDefaults } from "../../logic/jira";
 import { calendarError, nextPi, piContaining } from "../../logic/periods";
 import { fmtDateTime } from "../../logic/util";
 import { store, useStore } from "../../store";
 import type { JiraBoard, JiraField, JiraStatus, Period, Settings } from "../../types";
-import { CheckField, Dialog, SelectField } from "../Dialog";
+import { CheckField, Dialog, SelectField, TextField } from "../Dialog";
 
 interface PiRow extends Period {
   /** Stable key for the row while it is edited. */
@@ -107,6 +108,9 @@ export function JiraSettingsDialog({ onClose }: { onClose: () => void }) {
   const [fields, setFields] = useState<JiraField[]>([]);
   const [boards, setBoards] = useState<JiraBoard[]>([]);
   const [piValues, setPiValues] = useState<string[]>([]);
+  // The two "blocked" lists are kept as typed and split into names on save.
+  const [blockedStatuses, setBlockedStatuses] = useState("");
+  const [blockedLabels, setBlockedLabels] = useState("");
   const [syncMsg, setSyncMsg] = useState("");
   const [syncing, setSyncing] = useState(false);
 
@@ -115,7 +119,10 @@ export function JiraSettingsDialog({ onClose }: { onClose: () => void }) {
     api.getSettings().then(
       (v) => {
         if (!live) return;
-        setSettings(v);
+        const full = withSettingsDefaults(v);
+        setSettings(full);
+        setBlockedStatuses(full.jira.blocked.statuses.join(", "));
+        setBlockedLabels(full.jira.blocked.labels.join(", "));
         setRows((v.pis ?? []).map(row));
       },
       (e: unknown) => live && setLoadError(errorText(e)),
@@ -135,7 +142,8 @@ export function JiraSettingsDialog({ onClose }: { onClose: () => void }) {
     const problem = calendarError(pis);
     if (problem) return problem;
     try {
-      await api.saveSettings({ jira: settings.jira, pis });
+      const blocked = { ...settings.jira.blocked, statuses: parseStatusList(blockedStatuses), labels: parseStatusList(blockedLabels) };
+      await api.saveSettings({ jira: { ...settings.jira, blocked }, pis });
     } catch (e) {
       return errorText(e);
     }
@@ -158,6 +166,8 @@ export function JiraSettingsDialog({ onClose }: { onClose: () => void }) {
 
   const jira = settings?.jira;
   const setJira = (patch: Partial<Settings["jira"]>): void => setSettings((old) => (old ? { ...old, jira: { ...old.jira, ...patch } } : old));
+  const setBlocked = (patch: Partial<Settings["jira"]["blocked"]>): void =>
+    setSettings((old) => (old ? { ...old, jira: { ...old.jira, blocked: { ...old.jira.blocked, ...patch } } } : old));
   const custom = useMemo(() => fields.filter((f) => f.custom), [fields]);
 
   const connection = !status
@@ -215,12 +225,30 @@ export function JiraSettingsDialog({ onClose }: { onClose: () => void }) {
                 hint="Its active sprint sets the dates for bars that pace against the current sprint."
               />
             </div>
-            <CheckField
-              label="Show Jira summaries on screens"
-              checked={jira?.showSummaries ?? true}
-              onChange={(showSummaries) => setJira({ showSummaries })}
-              hint="Turn off to keep ticket titles out of a shared room. Bars then show the key, or the label you give them."
-            />
+            <div className="two">
+              <CheckField
+                label="Show Jira summaries on screens"
+                checked={jira?.showSummaries ?? true}
+                onChange={(showSummaries) => setJira({ showSummaries })}
+                hint="Turn off to keep ticket titles out of a shared room. Bars and cards then show the key, or the label you give them."
+              />
+              <CheckField
+                label="Show assignee names on screens"
+                checked={jira?.showAssignees ?? true}
+                onChange={(showAssignees) => setJira({ showAssignees })}
+                hint="Turn off to keep names off the flow boards."
+              />
+            </div>
+          </div>
+          <div className="dlg-section">
+            <h4>Blocked means</h4>
+            <span className="hint">Used for the Blocked marker on flow board cards and for the blocked KPIs. Any one of these is enough.</span>
+            <CheckField label="Flagged in Jira" checked={jira?.blocked.flagged ?? true} onChange={(flagged) => setBlocked({ flagged })} />
+            <div className="two">
+              <TextField label="In one of these statuses" value={blockedStatuses} onChange={setBlockedStatuses} placeholder="Blocked, On hold" hint="Comma separated." />
+              <TextField label="Has one of these labels" value={blockedLabels} onChange={setBlockedLabels} placeholder="blocked, waiting" hint="Comma separated." />
+            </div>
+            <CheckField label="Has an unresolved “is blocked by” link" checked={jira?.blocked.links ?? false} onChange={(links) => setBlocked({ links })} />
           </div>
           <div className="dlg-section">
             <h4>PI calendar</h4>

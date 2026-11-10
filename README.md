@@ -14,12 +14,12 @@ A configurable digital Obeya room for leadership and program management. Each wa
 - **Walls:** each wall is a grid of panels you can add, resize (one third, two thirds or full width), reorder and edit.
 - **Panel types:**
   - Statement: true north, a goal or a focus statement
-  - KPI tracker: actual against target, with a trend sparkline
+  - KPI tracker: actual against target, with a trend sparkline; the value can come from Jira
   - Portfolio: initiatives with health, progress and horizon; progress can come from Jira
   - Progress bars: Jira-linked or manual bars, with an optional pace marker
   - Problem solving: problems moving through Define, Analyze, Countermeasure, Verify and Closed
   - Action tracker: owner, due date and done, with late actions flagged
-  - Flow board: columns with WIP limits and drag-and-drop cards
+  - Flow board: columns with WIP limits and drag-and-drop cards, or a live read-only view of a Jira board
 - **Display mode** (`#tv-<wall-id>`): a dark theme that scales to fill the screen, with a clock, the current PI and sprint, and an "updated" stamp. Controls and the mouse cursor hide when the mouse is idle. The arrow keys switch walls and Escape exits. Screens can be set to rotate when there are fewer TVs than walls.
 - **Status encoding:** colored stripes and labels for KPIs off target, initiatives at risk, blocked work, columns over their WIP limit, high-severity problems, late actions and bars behind pace.
 - **Customize:** room name, accent color, separate themes for laptops and TVs, density, three room templates (Program, Leadership, Team delivery) and a JSON backup and import.
@@ -33,6 +33,12 @@ A progress bar can be linked three ways, all from the editor:
 - **Auto-fill.** A progress panel can take a query, and every issue it matches becomes its own bar, for example every epic in the current PI.
 
 Each bar chooses issue count or story points, which statuses count as done, its label, color, value format and pace marker.
+
+## Jira flow boards and KPIs
+
+- **Flow boards.** Point a flow board at a Jira board and it shows that board's own columns, WIP limits and cards. A scrum board shows the active sprint, so it rolls over when the sprint does.
+- **KPIs.** A KPI can be worked out from Jira: cycle time, lead time, throughput, blocked days, scope done, work in progress, blocked items and unplanned work. You still set the target.
+- **Blocked.** What counts as blocked (the flag, a status, a label, an "is blocked by" link) is set once under **Jira** and used everywhere.
 
 To keep sprint and PI changes hands-off:
 
@@ -80,7 +86,7 @@ cd frontend && npm test
 ## Roadmap
 
 1. Deploy to the VM and check the Jira calls against the real instance.
-2. Pull the flow boards and flow KPIs from Jira. GitLab metrics come after that.
+2. GitLab metrics.
 3. Add sign-in, or place the app behind the existing proxy.
 4. Keep strategy, problems and actions as manual entries, since those need human judgment.
 

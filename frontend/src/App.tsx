@@ -5,6 +5,7 @@ import { TvView } from "./components/TvView";
 import { BarDialog } from "./components/dialogs/BarDialog";
 import { ItemDialog } from "./components/dialogs/ItemDialog";
 import { JiraSettingsDialog } from "./components/dialogs/JiraSettingsDialog";
+import { KpiDialog } from "./components/dialogs/KpiDialog";
 import { AddPanelDialog, PanelSettingsDialog } from "./components/dialogs/PanelDialogs";
 import { AddWallDialog, CustomizeDialog, WallSettingsDialog } from "./components/dialogs/RoomDialogs";
 import { ACCENTS } from "./logic/seed";
@@ -27,6 +28,7 @@ function ActiveDialog({ spec, room, close }: { spec: DialogSpec; room: Room; clo
     case "item": {
       const p = findPanel(room, spec.panelId)?.panel;
       if (!p || p.type === "statement" || p.type === "progress") return null;
+      if (p.type === "kpi") return <KpiDialog panel={p} itemId={spec.itemId} onClose={close} />;
       return <ItemDialog panel={p} itemId={spec.itemId} col={spec.col} onClose={close} />;
     }
     case "bar": {
@@ -66,7 +68,7 @@ export function App() {
     }),
     [],
   );
-  const live = useMemo(() => liveOf(s), [s.progress, s.auto, s.periods, s.sync.jiraConfigured]);
+  const live = useMemo(() => liveOf(s), [s.progress, s.auto, s.boards, s.metrics, s.periods, s.sync.jiraConfigured]);
   const room = s.room;
 
   useEffect(() => {

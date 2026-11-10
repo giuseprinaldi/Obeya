@@ -17,8 +17,9 @@ from urllib.parse import urlsplit
 from .config import Config
 from .db import Database
 from .jira_client import JiraError, JiraUnavailable
+from .flow import clean_blocked_rule
 from .periods import clean_calendar, field_ref
-from .sources import normalize_auto, normalize_source, text_values
+from .sources import normalize_auto, normalize_board, normalize_metric, normalize_source, text_values
 from .sync import Syncer
 
 log = logging.getLogger("obeya.http")
@@ -61,6 +62,8 @@ def clean_settings(raw: Any) -> dict:
             "storyPointsField": str(jira.get("storyPointsField") or "").strip()[:100],
             "boardId": board,
             "showSummaries": jira.get("showSummaries", True) is not False,
+            "showAssignees": jira.get("showAssignees", True) is not False,
+            "blocked": clean_blocked_rule(jira.get("blocked")),
         },
         "pis": clean_calendar(raw.get("pis")),
     }
@@ -95,13 +98,11 @@ class App:
         row = self.db.get_room()
         settings = self.db.get_settings()
         room = row["doc"] if row else None
-        progress, auto = self.syncer.results_for(room)
         return {
             "room": room,
             "version": row["version"] if row else 0,
             "updatedAt": row["updated_at"].isoformat(timespec="seconds") if row else None,
-            "progress": progress,
-            "auto": auto,
+            **self.syncer.results_for(room),
             "periods": self.syncer.periods(settings),
             "sync": self.syncer.status(),
         }
@@ -127,14 +128,14 @@ class App:
     def save_settings(self, body: Any) -> dict:
         settings = clean_settings(body)
         self.db.save_settings(settings)
-        self.syncer.wake(full=True)
+        self.syncer.wake(full=True, force=True)
         return settings
 
     def sync_now(self, _body: Any) -> dict:
         if not self.cfg.jira_configured:
             return {"ok": False, "error": "Jira is not connected. Set JIRA_BASE_URL and JIRA_TOKEN on the server.",
                     "sources": 0, "durationMs": 0}
-        return self.syncer.run(full=True)
+        return self.syncer.run(full=True, force=True)
 
     def jira_status(self, _body: Any) -> dict:
         out = {"configured": self.cfg.jira_configured, "ok": False, "baseUrl": self.cfg.jira_base_url or None,
@@ -185,10 +186,21 @@ class App:
 
     def jira_preview(self, body: Any) -> dict:
         if not isinstance(body, dict):
-            raise ApiError(400, "Expected {source} or {auto}.")
-        spec = normalize_auto(body["auto"]) if body.get("auto") is not None else normalize_source(body.get("source"))
+            raise ApiError(400, "Expected one of {source}, {auto}, {board} or {metric}.")
+        if body.get("board") is not None:
+            spec = normalize_board(body["board"])
+            missing = "Pick a Jira board first."
+        elif body.get("metric") is not None:
+            spec = normalize_metric(body["metric"])
+            missing = "Pick a metric and a board or a query first."
+        elif body.get("auto") is not None:
+            spec = normalize_auto(body["auto"])
+            missing = "Enter a query first."
+        else:
+            spec = normalize_source(body.get("source"))
+            missing = "Enter a Jira key, a Jira link or a query first."
         if spec is None:
-            raise ApiError(400, "Enter a Jira key, a Jira link or a query first.")
+            raise ApiError(400, missing)
         self._client()
         return self.syncer.engine().compute(spec)
 

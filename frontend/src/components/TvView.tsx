@@ -13,7 +13,7 @@ import { PanelView } from "./PanelView";
 /* The stage is 1600px wide and scaled to the screen. When a wall holds more than fits, the stage is widened
    step by step (so everything gets a little smaller) until nothing is cut off, up to STAGE_MAX. */
 const STAGE_WIDTH = 1600;
-const STAGE_MAX = 2200;
+const STAGE_MAX = 2600;
 const STAGE_STEP = 100;
 const POINTER_IDLE_MS = 2500;
 

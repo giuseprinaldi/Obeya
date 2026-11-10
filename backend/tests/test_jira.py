@@ -10,6 +10,7 @@ from obeya.jira_client import JiraClient, JiraError, JiraUnavailable
 from obeya.sources import Engine, normalize_auto, normalize_source
 
 TODAY = date(2026, 11, 10)
+WORK = ("Story", "Bug")   # the issue types that sit under epics in the sample data
 
 
 def start_fake(**kwargs):
@@ -83,7 +84,7 @@ class EngineTests(unittest.TestCase):
 
     def expected(self, epic_keys, measure="count"):
         """Work out the answer straight from the dataset."""
-        stories = [i for i in self.ds.issues if i["type"] == "Story" and i["epic"] in epic_keys]
+        stories = [i for i in self.ds.issues if i["type"] in WORK and i["epic"] in epic_keys]
         empty = [self.ds.by_key(k) for k in epic_keys if not any(s["epic"] == k for s in stories)]
         items = stories + empty
         value = (lambda i: i["points"] or 0) if measure == "points" else (lambda i: 1)
@@ -110,14 +111,14 @@ class EngineTests(unittest.TestCase):
         r = self.engine().compute(normalize_source({"kind": "issue", "key": "plat-1"}))
         self.assertEqual((r["total"], r["done"], r["issues"]), self.expected(epics))
         # The epic with no stories counts as one open item, and epics with stories are not counted themselves.
-        self.assertEqual(r["issues"], sum(1 for i in self.ds.issues if i["type"] == "Story" and i["epic"] in epics) + 1)
+        self.assertEqual(r["issues"], sum(1 for i in self.ds.issues if i["type"] in WORK and i["epic"] in epics) + 1)
 
     def test_points(self):
         epics = [i["key"] for i in self.ds.issues if i["parent_link"] == "DATA-1"]
         r = self.engine().compute(normalize_source({"kind": "issue", "key": "DATA-1", "measure": "points"}))
         total, done, _ = self.expected(epics, "points")
         self.assertEqual((r["unit"], r["total"], r["done"]), ("points", total, done))
-        stories = [i for i in self.ds.issues if i["type"] == "Story" and i["epic"] in epics]
+        stories = [i for i in self.ds.issues if i["type"] in WORK and i["epic"] in epics]
         self.assertEqual(r["unestimated"], sum(1 for s in stories if s["points"] is None))
         self.assertGreater(r["unestimated"], 0)
 
@@ -128,11 +129,10 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(with_subs["issues"], without["issues"] + 1)
 
     def test_custom_done_statuses(self):
-        epic = next(i["key"] for i in self.ds.issues if i["summary"] == "AI review service")
+        epic = next(i["epic"] for i in self.ds.issues if i["status"] == "In Review" and i["type"] in WORK)
         r = self.engine().compute(normalize_source(
             {"kind": "issue", "key": epic, "doneStatuses": ["Done", "In Review"]}))
-        stories = [i for i in self.ds.issues if i["epic"] == epic and i["type"] == "Story"]
-        self.assertEqual(len(stories), 12)
+        stories = [i for i in self.ds.issues if i["epic"] == epic and i["type"] in WORK]
         self.assertTrue(any(s["status"] == "In Review" for s in stories))
         self.assertEqual(r["done"], sum(1 for s in stories if s["status"] in ("Done", "In Review")))
         self.assertEqual(r["inProgress"], sum(1 for s in stories if s["status"] == "In Progress"))
@@ -207,7 +207,7 @@ class OpaqueParentLink(unittest.TestCase):
             by_key = {b["key"]: b for b in r["bars"]}
             for root in ("PLAT-1", "DATA-1"):
                 epics = [i["key"] for i in ds.issues if i["parent_link"] == root]
-                stories = [i for i in ds.issues if i["type"] == "Story" and i["epic"] in epics]
+                stories = [i for i in ds.issues if i["type"] in WORK and i["epic"] in epics]
                 empties = sum(1 for e in epics if not any(s["epic"] == e for s in stories))
                 self.assertEqual(by_key[root]["issues"], len(stories) + empties, root)
         finally:

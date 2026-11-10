@@ -6,6 +6,7 @@ import type {
   JiraSource,
   KanbanPanel,
   KpiPanel,
+  Metric,
   Panel,
   PanelType,
   PortfolioItem,
@@ -20,6 +21,8 @@ import type {
   StatementPanel,
   Wall,
 } from "../types";
+import { defaultBoardSource } from "./board";
+import { defaultMetric } from "./kpi";
 import { defaultDisplay, defaultJiraOptions } from "./progress";
 import { dayOffset, uid } from "./util";
 
@@ -73,6 +76,7 @@ export function newPanel(type: PanelType, title: string, span: Span): Panel {
             { id: uid(), name: "Done", wip: 0 },
           ],
           cards: [],
+          jira: null,
         },
       };
     case "progress":
@@ -90,7 +94,7 @@ export function newPanel(type: PanelType, title: string, span: Span): Panel {
 
 /* ---------- Builders for the example content ---------- */
 
-type KpiRow = [name: string, unit: string, target: number, actual: number, dir: "up" | "down", history: number[]];
+type KpiRow = [name: string, unit: string, target: number, actual: number, dir: "up" | "down", history: number[], metric?: Metric];
 type PortfolioRow = [name: string, owner: string, health: PortfolioItem["health"], progress: number, horizon: string, note: string, issueKey?: string];
 type ProblemRow = [title: string, owner: string, severity: Severity, stage: Stage, problem: string, cause: string, countermeasure: string];
 type ActionRow = [text: string, owner: string, dueInDays: number, done: boolean];
@@ -105,7 +109,7 @@ const P = {
     type: "kpi",
     title,
     span,
-    data: { items: rows.map(([name, unit, target, actual, dir, history]) => ({ id: uid(), name, unit, target, actual, dir, history })) },
+    data: { items: rows.map(([name, unit, target, actual, dir, history, metric]) => ({ id: uid(), name, unit, target, actual, dir, history, metric: metric ?? null })) },
   }),
   portfolio: (title: string, rows: PortfolioRow[], span: Span = 3): PortfolioPanel => ({
     id: uid(),
@@ -139,7 +143,7 @@ const P = {
     span,
     data: { items: rows.map(([text, owner, off, done]) => ({ id: uid(), text, owner, due: dayOffset(off), done })) },
   }),
-  kanban: (title: string, cols: [string, number][], cards: CardRow[], span: Span = 3): KanbanPanel => {
+  kanban: (title: string, cols: [string, number][], cards: CardRow[], span: Span = 3, jira: KanbanPanel["data"]["jira"] = null): KanbanPanel => {
     const columns = cols.map(([name, wip]) => ({ id: uid(), name, wip }));
     return {
       id: uid(),
@@ -149,6 +153,7 @@ const P = {
       data: {
         columns,
         cards: cards.map(([t, ci, owner, tag, blocked]) => ({ id: uid(), title: t, col: columns[ci]?.id ?? columns[0]!.id, owner, tag, blocked: !!blocked })),
+        jira,
       },
     };
   },
@@ -162,6 +167,12 @@ const P = {
 };
 
 const paced = (pace: BarDisplay["pace"]): BarDisplay => ({ ...defaultDisplay(), pace });
+
+/** The Jira board and scope the example room reads from. They exist in the fake Jira; on a real one, pick your own. */
+const EXAMPLE_BOARD = 1;
+const EXAMPLE_SCOPE = "project = PLAT";
+const onBoard = (kind: Metric["kind"], over: Partial<Metric> = {}): Metric => ({ ...defaultMetric(kind), boardId: EXAMPLE_BOARD, ...over });
+const inScope = (kind: Metric["kind"], over: Partial<Metric> = {}): Metric => ({ ...defaultMetric(kind), jql: EXAMPLE_SCOPE, ...over });
 
 type WallSeed = Omit<Wall, "id">;
 
@@ -197,7 +208,9 @@ export const LIBRARY: Record<string, { name: string; build: () => WallSeed }> = 
         P.kpi(
           "Delivery and flow",
           [
-            ["Lead time for change", "days", 5, 7.5, "down", [12, 11, 10, 9.5, 8, 7.5]],
+            ["Lead time for change", "days", 5, 7.5, "down", [12, 11, 10, 9.5, 8, 7.5], inScope("lead_time")],
+            ["Cycle time", "days", 4, 4.5, "down", [7, 6.5, 6, 5, 5.2, 4.5], inScope("cycle_time")],
+            ["Throughput", "/ week", 6, 5, "up", [3, 4, 4, 5, 6, 5], inScope("throughput")],
             ["Deploys per week", "", 10, 9, "up", [4, 5, 6, 7, 8, 9]],
             ["Change failure rate", "%", 10, 14, "down", [18, 17, 15, 16, 15, 14]],
             ["Proposals reviewed", "/ month", 12, 13, "up", [5, 7, 8, 10, 11, 13]],
@@ -219,9 +232,9 @@ export const LIBRARY: Record<string, { name: string; build: () => WallSeed }> = 
         P.kpi(
           "Sprint health",
           [
-            ["Scope done", "%", 100, 62, "up", [0, 10, 22, 35, 48, 62]],
-            ["Blocked days", "", 0, 3, "down", [0, 1, 1, 2, 3, 3]],
-            ["Unplanned work", "%", 15, 12, "down", [5, 8, 9, 10, 12, 12]],
+            ["Scope done", "%", 100, 62, "up", [0, 10, 22, 35, 48, 62], onBoard("scope_done", { measure: "points" })],
+            ["Blocked days", "days", 0, 3, "down", [0, 1, 1, 2, 3, 3], onBoard("blocked_days", { windowDays: 14 })],
+            ["Unplanned work", "%", 15, 12, "down", [5, 8, 9, 10, 12, 12], onBoard("unplanned")],
           ],
           2,
         ),
@@ -261,6 +274,8 @@ export const LIBRARY: Record<string, { name: string; build: () => WallSeed }> = 
             ["CI pipeline", 4, "Dana", "Infra"],
           ],
           3,
+          // The manual columns and cards above stay as the fallback when the Jira source is switched off.
+          defaultBoardSource(EXAMPLE_BOARD),
         ),
       ],
     }),

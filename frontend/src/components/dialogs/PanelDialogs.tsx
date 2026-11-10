@@ -1,13 +1,14 @@
 /* Panel settings (title, width, and what each panel type adds) and the add-panel picker. */
 import { useId, useState } from "react";
+import { MAX_CARDS_MAX, MAX_CARDS_MIN, defaultBoardSource, hideableColumns } from "../../logic/board";
 import { defaultDisplay } from "../../logic/progress";
 import { PANEL_TYPES, SPANS, newPanel } from "../../logic/seed";
 import { clamp, uid } from "../../logic/util";
 import { store } from "../../store";
-import type { AutoSource, BarDisplay, Panel, PanelType, ProgressSort, Span, Wall } from "../../types";
+import type { AutoSource, BarDisplay, BoardResult, BoardSource, JiraBoard, Panel, PanelType, ProgressSort, Span, Wall } from "../../types";
 import { findPanel, wallById } from "../../ui";
-import { CheckField, Dialog, SelectField, TextArea, TextField } from "../Dialog";
-import { CheckLink, DisplayFields, JqlInput, OptionsFields, displayError, optionsDraft, optionsOf, type OptionsDraft } from "./JiraFields";
+import { CheckField, Dialog, Segmented, SelectField, TextArea, TextField } from "../Dialog";
+import { BoardPicker, CheckLink, DisplayFields, JqlInput, OptionsFields, displayError, optionsDraft, optionsOf, useBoards, type OptionsDraft } from "./JiraFields";
 
 const SPAN_OPTIONS = SPANS.map(([n, l]) => [String(n), l] as const);
 const toSpan = (s: string): Span => (s === "2" ? 2 : s === "3" ? 3 : 1);
@@ -69,6 +70,112 @@ function ColumnsEditor({ value, onChange }: { value: ColumnDraft[]; onChange: (v
   );
 }
 
+/* ---------- Flow board fed by a Jira board ---------- */
+
+type BoardMode = "manual" | "jira";
+const BOARD_MODES: readonly (readonly [BoardMode, string])[] = [
+  ["manual", "Manual"],
+  ["jira", "Jira board"],
+];
+const SPRINT_SCOPES: readonly (readonly [BoardSource["sprint"], string])[] = [
+  ["active", "The active sprint"],
+  ["all", "Everything on the board"],
+];
+const BOARD_PRESETS = [
+  { label: "Current PI", jql: '{PI_FIELD} = "{PI}"' },
+  // Kanban boards in Jira list epics as cards; this leaves only the work items.
+  { label: "Without epics", jql: "issuetype != Epic" },
+];
+
+/** The Jira source as typed into the form: no board chosen yet is allowed, and numbers are still text. */
+interface BoardDraft {
+  boardId: number | null;
+  jql: string;
+  sprint: BoardSource["sprint"];
+  hidden: string[];
+  maxCards: string;
+  doneDays: string;
+}
+
+function boardDraft(src: BoardSource | null | undefined): BoardDraft {
+  const s = src ?? defaultBoardSource(0);
+  return { boardId: src ? s.boardId : null, jql: s.jql, sprint: s.sprint, hidden: s.hiddenColumns, maxCards: String(s.maxCards), doneDays: String(s.doneDays) };
+}
+
+/** The source a draft describes, or a message saying what is missing. */
+function boardOf(d: BoardDraft): BoardSource | string {
+  if (d.boardId === null) return "Choose the Jira board this panel shows.";
+  const maxCards = Math.round(Number(d.maxCards));
+  if (!Number.isFinite(maxCards) || maxCards < MAX_CARDS_MIN || maxCards > MAX_CARDS_MAX) return `Cards per column must be between ${MAX_CARDS_MIN} and ${MAX_CARDS_MAX}.`;
+  const doneDays = d.doneDays.trim() === "" ? 0 : Math.round(Number(d.doneDays));
+  if (!Number.isFinite(doneDays) || doneDays < 0) return "The number of days for the done column must be 0 or more.";
+  return { boardId: d.boardId, jql: d.jql.trim(), sprint: d.sprint, hiddenColumns: d.hidden, maxCards, doneDays };
+}
+
+interface BoardFieldsProps {
+  value: BoardDraft;
+  onChange: (v: BoardDraft) => void;
+  boards: JiraBoard[];
+  boardsError: string;
+  /** What Jira last returned for this panel, and what the Check button just returned. */
+  last: BoardResult | undefined;
+  checked: BoardResult | null;
+  onChecked: (r: BoardResult) => void;
+}
+
+function BoardFields({ value, onChange, boards, boardsError, last, checked, onChecked }: BoardFieldsProps) {
+  const type = boards.find((b) => b.id === value.boardId)?.type ?? (checked?.ok ? checked.boardType : last?.ok ? last.boardType : "");
+  const names = hideableColumns(value.hidden, checked, last);
+  const hidden = new Set(value.hidden.map((n) => n.toLowerCase()));
+  const toggle = (name: string, hide: boolean): void =>
+    onChange({ ...value, hidden: hide ? [...value.hidden, name] : value.hidden.filter((n) => n.toLowerCase() !== name.toLowerCase()) });
+  return (
+    <>
+      <BoardPicker
+        label="Jira board"
+        value={value.boardId}
+        onChange={(boardId) => onChange({ ...value, boardId, hidden: boardId === value.boardId ? value.hidden : [] })}
+        boards={boards}
+        emptyLabel="Choose a board"
+        hint={boardsError ? `The list of boards could not be read: ${boardsError}` : "Columns, WIP limits and cards all come from this board, and the panel becomes read-only."}
+      />
+      {type !== "kanban" ? <SelectField label="Show" value={value.sprint} onChange={(sprint) => onChange({ ...value, sprint })} options={SPRINT_SCOPES} /> : null}
+      <JqlInput value={value.jql} onChange={(jql) => onChange({ ...value, jql })} label="Extra filter (JQL), optional" presets={BOARD_PRESETS} placeholder='labels = platform AND {PI_FIELD} = "{PI}"' />
+      <div className="two">
+        <TextField label="Cards per column" type="number" min={MAX_CARDS_MIN} max={MAX_CARDS_MAX} step={1} value={value.maxCards} onChange={(maxCards) => onChange({ ...value, maxCards })} hint="The rest are counted as “+N more”." />
+        <TextField label="Done column shows the last (days)" type="number" min={0} step={1} value={value.doneDays} onChange={(doneDays) => onChange({ ...value, doneDays })} hint="0 shows everything that is done." />
+      </div>
+      <fieldset className="field" style={{ border: 0, margin: 0, padding: 0 }}>
+        <legend className="legend" style={{ padding: 0, marginBottom: 5 }}>
+          Columns to hide
+        </legend>
+        {names.length ? (
+          <div className="seg">
+            {names.map((n) => (
+              <label key={n}>
+                <input type="checkbox" checked={hidden.has(n.toLowerCase())} onChange={(e) => toggle(n, e.target.checked)} />
+                {n}
+              </label>
+            ))}
+          </div>
+        ) : (
+          <span className="hint">Press Check to list the board's columns.</span>
+        )}
+      </fieldset>
+      <CheckLink
+        label="Check"
+        build={() => {
+          const b = boardOf(value);
+          return typeof b === "string" ? b : { board: b };
+        }}
+        onResult={(r) => {
+          if ("columns" in r) onChecked(r);
+        }}
+      />
+    </>
+  );
+}
+
 interface AutoDraft extends OptionsDraft {
   on: boolean;
   jql: string;
@@ -91,6 +198,12 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
   const [columns, setColumns] = useState<ColumnDraft[]>(() =>
     panel.type === "kanban" ? panel.data.columns.map((c) => ({ id: c.id, name: c.name, wip: Number(c.wip) > 0 ? String(c.wip) : "" })) : [],
   );
+  const jiraSource = panel.type === "kanban" ? panel.data.jira : null;
+  const [boardMode, setBoardMode] = useState<BoardMode>(jiraSource ? "jira" : "manual");
+  const [board, setBoard] = useState<BoardDraft>(() => boardDraft(jiraSource));
+  const [checked, setChecked] = useState<BoardResult | null>(null);
+  const [lastBoard] = useState<BoardResult | undefined>(() => store.getState().boards[panel.id]);
+  const { boards, error: boardsError } = useBoards();
   const pd = panel.type === "progress" ? panel.data : null;
   const [sort, setSort] = useState<ProgressSort>(pd?.sort ?? "manual");
   const [showKeys, setShowKeys] = useState(pd?.showKeys ?? true);
@@ -101,7 +214,12 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
     const name = title.trim();
     if (!name) return "Give the panel a title.";
     let cols: { id: string; name: string; wip: number }[] = [];
-    if (panel.type === "kanban") {
+    let boardSource: BoardSource | null = null;
+    if (panel.type === "kanban" && boardMode === "jira") {
+      const b = boardOf(board);
+      if (typeof b === "string") return b;
+      boardSource = b;
+    } else if (panel.type === "kanban") {
       cols = columns.map((c) => ({ id: c.id, name: c.name.trim(), wip: Math.max(0, parseInt(c.wip, 10) || 0) }));
       if (!cols.length) return "A flow board needs at least one column.";
       if (cols.some((c) => !c.name)) return "Give every column a name, or remove the empty ones.";
@@ -122,7 +240,11 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
       p.title = name;
       p.span = toSpan(span);
       if (p.type === "statement") p.data = { text: text.trim(), meta: meta.trim() };
-      if (p.type === "kanban") {
+      if (p.type === "kanban" && boardSource) {
+        // The manual columns and cards are left exactly as they were, for when the board goes back to Manual.
+        p.data.jira = boardSource;
+      } else if (p.type === "kanban") {
+        p.data.jira = null;
         const ids = new Set(cols.map((c) => c.id));
         const first = cols[0]!.id;
         for (const card of p.data.cards) if (!ids.has(card.col)) card.col = first;
@@ -144,7 +266,7 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
     });
 
   return (
-    <Dialog title="Edit panel" onClose={onClose} onSubmit={save} wide={panel.type === "progress"} danger={{ label: "Delete panel", onConfirm: removePanel }}>
+    <Dialog title="Edit panel" onClose={onClose} onSubmit={save} wide={panel.type === "progress" || panel.type === "kanban"} danger={{ label: "Delete panel", onConfirm: removePanel }}>
       <div className="two">
         <TextField label="Panel title" value={title} onChange={setTitle} />
         <SelectField label="Width on the wall" value={span} onChange={setSpan} options={SPAN_OPTIONS} />
@@ -155,7 +277,19 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
           <TextField label="Supporting line" value={meta} onChange={setMeta} placeholder="Owner, cadence or date" />
         </>
       ) : null}
-      {panel.type === "kanban" ? <ColumnsEditor value={columns} onChange={setColumns} /> : null}
+      {panel.type === "kanban" ? (
+        <>
+          <Segmented legend="Source" value={boardMode} onChange={setBoardMode} options={BOARD_MODES} />
+          {boardMode === "manual" ? (
+            <ColumnsEditor value={columns} onChange={setColumns} />
+          ) : (
+            <>
+              <BoardFields value={board} onChange={setBoard} boards={boards} boardsError={boardsError} last={lastBoard} checked={checked} onChecked={setChecked} />
+              <span className="hint">The columns and cards entered by hand are kept, and come back if you switch to Manual.</span>
+            </>
+          )}
+        </>
+      ) : null}
       {panel.type === "progress" ? (
         <>
           <div className="two">

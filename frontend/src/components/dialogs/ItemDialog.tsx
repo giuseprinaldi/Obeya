@@ -1,4 +1,4 @@
-/* Add or edit one item on a KPI, portfolio, problems, actions or flow board panel. */
+/* Add or edit one item on a portfolio, problems, actions or flow board panel. KPIs have their own dialog. */
 import { useState } from "react";
 import { SEVERITIES, STAGES, itemNoun } from "../../logic/seed";
 import { clamp, dayOffset, uid } from "../../logic/util";
@@ -8,7 +8,7 @@ import { findPanel } from "../../ui";
 import { CheckField, Dialog, Segmented, SelectField, TextArea, TextField } from "../Dialog";
 import { CheckLink, LinkFields, linkDraft, linkSource, type LinkDraft } from "./JiraFields";
 
-type ItemPanel = Exclude<Panel, { type: "statement" } | { type: "progress" }>;
+type ItemPanel = Exclude<Panel, { type: "statement" } | { type: "progress" } | { type: "kpi" }>;
 type Vals = Record<string, string | boolean>;
 
 interface FieldDef {
@@ -22,14 +22,6 @@ interface FieldDef {
 }
 
 const FIELDS: Record<ItemPanel["type"], FieldDef[]> = {
-  kpi: [
-    { k: "name", l: "KPI name", t: "text" },
-    { k: "unit", l: "Unit", t: "text", ph: "%, days, / month" },
-    { k: "target", l: "Target", t: "number", half: true },
-    { k: "actual", l: "Current value", t: "number", half: true },
-    { k: "dir", l: "Better when", t: "select", o: [["up", "Higher"], ["down", "Lower"]] },
-    { k: "history", l: "History, oldest first", t: "numlist", hint: "Comma separated. Saving a new current value adds it to the end." },
-  ],
   portfolio: [
     { k: "name", l: "Initiative", t: "text" },
     { k: "owner", l: "Owner", t: "text", half: true },
@@ -64,8 +56,6 @@ const FIELDS: Record<ItemPanel["type"], FieldDef[]> = {
 
 function defaults(panel: ItemPanel, col?: string): Record<string, unknown> {
   switch (panel.type) {
-    case "kpi":
-      return { dir: "up", history: [] };
     case "portfolio":
       return { health: "on", progress: 0 };
     case "problems":
@@ -100,11 +90,6 @@ const numOrBlank = (v: Vals, k: string): number | "" => {
   const n = parseFloat(String(v[k] ?? ""));
   return isFinite(n) ? n : "";
 };
-const numList = (v: Vals, k: string): number[] =>
-  String(v[k] ?? "")
-    .split(",")
-    .map((s) => parseFloat(s))
-    .filter((n) => isFinite(n));
 const pick = <T extends string>(v: Vals, k: string, options: readonly T[], d: T): T => {
   const s = text(v, k);
   return (options as readonly string[]).includes(s) ? (s as T) : d;
@@ -121,17 +106,6 @@ function apply(room: Room, panelId: string, itemId: string | undefined, v: Vals,
     else list.push({ id: uid(), ...item } as T);
   };
   switch (p.type) {
-    case "kpi": {
-      const prev = itemId ? p.data.items.find((x) => x.id === itemId) : undefined;
-      const actual = numOrBlank(v, "actual");
-      const history = numList(v, "history");
-      if (actual !== "") {
-        const changed = !!prev && Number(actual) !== Number(prev.actual) && history[history.length - 1] !== actual;
-        if (!history.length || changed) history.push(actual);
-      }
-      put(p.data.items, { name: text(v, "name"), unit: text(v, "unit"), target: numOrBlank(v, "target"), actual, dir: pick(v, "dir", ["up", "down"] as const, "up"), history });
-      break;
-    }
     case "portfolio":
       put(p.data.items, {
         name: text(v, "name"),
@@ -165,6 +139,7 @@ function apply(room: Room, panelId: string, itemId: string | undefined, v: Vals,
     }
     case "statement":
     case "progress":
+    case "kpi":
       break;
   }
 }

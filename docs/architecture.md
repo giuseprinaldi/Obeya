@@ -32,20 +32,53 @@ TV 2 (#tv-...)   ─┘            │  serves the React build and /api
 
 **Jira outages.** If Jira is unreachable or rejects the token, the sync stops and keeps the last good numbers; the error shows in Jira settings. A broken link (unknown key, bad JQL) shows its error on that bar only.
 
+## How Jira flow boards work
+
+A flow board panel can be switched from manual cards to a Jira board. Nothing is mapped by hand:
+
+- **Columns and WIP limits** come from the board's own configuration in Jira (`/rest/agile/1.0/board/{id}/configuration`), so a column added or a limit changed in Jira shows up on the next sync.
+- **Cards** are the issues on that board. A scrum board shows its active sprint (or everything, by choice); a kanban board applies its sub-filter. An optional extra query narrows either. Sub-tasks are left out.
+- **The last column** only shows work finished in the last N days (14 by default), so it does not grow forever.
+- **Each card** carries key, summary, type, assignee, points, days in its current status category and whether it is blocked. Screens get at most 30 cards per column plus the true column total.
+
+The board is read-only in Obeya; Jira stays the place where work moves.
+
+## How Jira KPIs work
+
+A KPI can take its value from Jira instead of being typed in. Target and direction stay manual. The scope is a board, a query, or both. Sub-tasks are never counted.
+
+| Metric | What it measures | Needs issue history |
+|---|---|---|
+| Cycle time | Days from the first "in progress" status to done, for work finished in the window. Median, average or 85th percentile. Work that went straight from to-do to done has no cycle time and is left out. | Yes |
+| Lead time | Days from created to done, for work finished in the window. | Yes |
+| Throughput | Items finished per week, averaged over the window. | Yes |
+| Blocked days | Total days items spent blocked in the window, counting the flag and blocked statuses. Overlaps are counted once. | Yes |
+| Scope done | Percent of the scope that is done now, by issues or points. | No |
+| Work in progress | Items (or points) in progress now. | No |
+| Blocked items | Items blocked now. | No |
+| Unplanned work | Percent of the scope that is unplanned: added to the active sprint after the day it started, or carrying a chosen label, or of a chosen issue type. | Only for "added after start" |
+
+- **Done** means Jira's "Done" status category, or the status names given on the KPI. Reopened work is not done until it is finished again.
+- **On a scrum board**, the right-now metrics look at the active sprint and the look-back metrics look at the whole board.
+- **Trend.** Look-back metrics come with eight weekly points worked out from history, so the sparkline is filled in from the first sync. Right-now metrics are snapshotted once a day and build their trend over time.
+- **Load on Jira.** Look-back metrics read issue histories, which is the heaviest call, so they are recomputed at most every 30 minutes. "Sync now" and saving Jira settings recompute them at once.
+
+**Blocked** is defined once, under "Blocked means" in Jira settings, and used by cards and metrics alike: the Flagged field, named statuses, named labels, an unresolved "is blocked by" link, or any combination. Blocked days can only replay the flag and statuses, because labels and links leave no usable history.
+
 ## API
 
 All JSON, same origin. Errors are `{"error": "..."}` with a non-2xx status. Types are in `frontend/src/types.ts`.
 
 | Method and path | Purpose |
 |---|---|
-| `GET /api/state` | Room, version, Jira results (`progress`, `auto`), `periods`, `sync` status. Sends an ETag. |
+| `GET /api/state` | Room, version, Jira results (`progress`, `auto`, `boards`, `metrics`), `periods`, `sync` status. Sends an ETag. |
 | `PUT /api/room` | Body `{room, baseVersion}`. `200 {version, updatedAt}`, or `409 {error: "conflict", version, room}` if someone saved first. `baseVersion` 0 creates the room. |
-| `GET /api/settings`, `PUT /api/settings` | PI field, story points field, board, summaries on or off, PI calendar. Saving triggers a full sync. |
+| `GET /api/settings`, `PUT /api/settings` | PI field, story points field, board, summaries and assignee names on or off, the blocked rule, PI calendar. Saving triggers a full sync. |
 | `POST /api/sync` | Run a full sync now and wait for it. |
 | `GET /api/jira/status` | Whether Jira is configured and reachable with the token. |
 | `GET /api/jira/fields`, `GET /api/jira/boards` | For the pickers in Jira settings. |
 | `GET /api/jira/pi-values` | Distinct values recently used in the PI field, as name suggestions. |
-| `POST /api/jira/preview` | Body `{source}` or `{auto}`. Computes a link without saving it ("Check link"). |
+| `POST /api/jira/preview` | Body `{source}`, `{auto}`, `{board}` or `{metric}`. Computes a link without saving it ("Check"). |
 | `GET /api/health` | `{ok: true}` when the database answers. |
 
 Anything else under `/` is served from `frontend/dist`, with `index.html` as the fallback.
@@ -93,23 +126,26 @@ Environment variables, or `backend/.env` (see `backend/.env.example`):
 - **No sign-in.** Anyone who can reach the port can edit the room. Put it behind the reverse proxy or SSO used for the other internal tools, or restrict it to the room's network.
 - **Read-only Jira.** The client only sends GET requests and the search POST. Use a read-only service account anyway.
 - **Token handling.** The token is read from the environment, sent only to `JIRA_BASE_URL`, never stored in the database and never sent to a browser. Redirects to another host are refused.
-- **Summaries.** "Show Jira summaries on screens" can be switched off in Jira settings; bars then show keys or the labels typed in Obeya, and summaries never leave the server.
+- **Summaries and names.** "Show Jira summaries on screens" and "Show assignee names on screens" can each be switched off in Jira settings. Bars and cards then show keys only, and the summaries or names never leave the server.
 - **Dependencies.** Backend: none with SQLite; `psycopg` with Postgres. Frontend runtime: `react`, `react-dom` and three font packages.
 
 ## Tested and not tested
 
-- **Tested:** 74 backend tests (`python -m unittest discover -s tests -t .` in `backend/`), covering the PI calendar, JQL variables, progress maths, the Jira client and hierarchy walk over real HTTP against the fake Jira, and the API against a real SQLite database. Setting `OBEYA_TEST_DATABASE_URL` to a `postgresql://` URL runs the API tests a second time on Postgres (93 tests in total).
-- **Frontend:** 41 unit tests on the status, pace, link-parsing and calendar logic (`npm test` in `frontend/`). The built app was also run in Chrome against this server and the fake Jira: first-run seeding, linking a bar from a pasted Jira URL, Check link (good and bad keys), auto-fill bars, Jira settings, display mode at 1366x768, 1920x1080 and 3840x2160, arrow keys and Escape, and the "changed on another device" conflict path.
+- **Tested:** 112 backend tests (`python -m unittest discover -s tests -t .` in `backend/`), covering the PI calendar, JQL variables, progress and flow maths on hand-built histories, the Jira client, hierarchy walk, boards and metrics over real HTTP against the fake Jira, and the API against a real SQLite database. Setting `OBEYA_TEST_DATABASE_URL` to a `postgresql://` URL runs the API tests a second time on Postgres (135 tests in total).
+- **Frontend:** 80 unit tests on the status, pace, link-parsing, calendar, board and KPI logic (`npm test` in `frontend/`). The built app was also run in Chrome against this server and the fake Jira: first-run seeding, linking a bar from a pasted Jira URL, Check link (good and bad keys), auto-fill bars, adding a Jira KPI, switching a flow board between Jira boards, the "Blocked means" and assignee settings taking effect, Jira settings, display mode at 1366x768 and 1920x1080, arrow keys and Escape, and the "changed on another device" conflict path.
 - **Frontend, not tested:** Firefox and Safari (the bar layout uses CSS subgrid, `:has()` and container queries, so use a current browser on the TVs), the wall rotation timer over a long run, and the copy-to-clipboard button.
-- **Display mode has a density limit.** A wall is scaled to fit the screen, and text shrinks as a wall gets denser, down to a floor. Past that floor panels are cut off at the bottom rather than scrolled. The example Delivery wall (four panels, nine bars, a five-column board) fits a 16:9 screen; much more than that should be split across two walls.
+- **Display mode has a density limit.** A wall is scaled to fit the screen, and text shrinks as a wall gets denser, down to a floor. Past that floor panels are cut off at the bottom rather than scrolled. The example Delivery wall (four panels, three KPIs, eight bars and a four-column Jira board at six cards per column) fits a 16:9 screen with a little shrinking; much more than that should be split across two walls, or the board given fewer cards per column.
 - **Not tested against real Jira.** The fake follows Data Center's documented shapes, but these need checking on the VM:
-  - that the service token can read the projects involved;
+  - that the service token can read the projects and boards involved;
+  - that this Jira version reports `statuscategorychangedate` (it drives the age shown on cards; without it cards simply show no age);
+  - that the flag field is called "Flagged", which is how the server finds it;
+  - that searches with `expand=changelog` return complete histories for long-lived issues (the look-back metrics depend on it);
   - how this instance returns the Parent Link field (the code handles a key, an id or an object, and falls back to one query per parent if it cannot read it);
   - that the PI field accepts `cf[NNNNN] = "name"` (a text field would need `~` in the query instead of `=`).
 - **Jira Cloud is untested.** The client switches to Cloud's search endpoint and `parent` hierarchy when `serverInfo` reports Cloud, but nothing has exercised it.
 
 ## Not built yet
 
-- Flow boards and flow KPIs fed from Jira (cycle time, throughput, blocked days). The discovery items in `jira-integration.md` about "blocked" and KPI rules still apply to those.
 - GitLab metrics.
+- Moving cards from Obeya. Jira boards are read-only here by design.
 - Sign-in and per-user permissions.

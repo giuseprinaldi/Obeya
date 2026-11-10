@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlsplit
 
-from .data import PI_FIELD, STORY_POINTS, Dataset, FIELDS
+from .data import PI_FIELD, STATUSES, STORY_POINTS, Dataset, FIELDS, status_json
 from .jql import JqlError, search
 
 DEFAULT_TOKEN = "fake-token"
@@ -54,8 +54,24 @@ def make_fake_server(host: str = "127.0.0.1", port: int = 8790, token: str = DEF
                                  "serverTitle": "Fake Jira"})
             elif method == "GET" and path == "/rest/api/2/field":
                 self._send(200, FIELDS)
+            elif method == "GET" and path == "/rest/api/2/status":
+                self._send(200, [status_json(name) for name in STATUSES])
             elif path == "/rest/api/2/search":
                 self._search({**query, **body} if method == "POST" else query)
+            elif method == "GET" and (m := re.fullmatch(r"/rest/agile/1\.0/board/(\d+)/configuration", path)):
+                config = dataset.board_config(int(m.group(1)))
+                if config is None:
+                    self._send(404, {"errorMessages": ["Board does not exist or you do not have permission to see it."], "errors": {}})
+                else:
+                    self._send(200, config)
+            elif method == "GET" and (m := re.fullmatch(r"/rest/agile/1\.0/board/(\d+)/issue", path)):
+                project = dataset.board_project(int(m.group(1)))
+                if project is None:
+                    self._send(404, {"errorMessages": ["Board does not exist or you do not have permission to see it."], "errors": {}})
+                else:
+                    extra = str(query.get("jql") or "").strip()
+                    jql = f"project = {project}" + (f" AND ({extra})" if extra else "")
+                    self._search({**query, "jql": jql})
             elif method == "GET" and path == "/rest/agile/1.0/board":
                 self._send(200, {"maxResults": 50, "startAt": 0, "isLast": True, "values": dataset.boards})
             elif method == "GET" and (m := re.fullmatch(r"/rest/agile/1\.0/board/(\d+)/sprint", path)):
@@ -79,9 +95,12 @@ def make_fake_server(host: str = "127.0.0.1", port: int = 8790, token: str = DEF
             fields = args.get("fields")
             if isinstance(fields, str):
                 fields = fields.split(",")
+            expand = args.get("expand") or ""
+            if isinstance(expand, list):
+                expand = ",".join(expand)
             page = []
             for issue in matches[start:start + size]:
-                item = dataset.to_json(issue, self._base(), fields)
+                item = dataset.to_json(issue, self._base(), fields, changelog="changelog" in expand)
                 if parent_link_shape == "opaque":
                     for name, value in item["fields"].items():
                         if name == "customfield_10102" and value:
@@ -105,7 +124,9 @@ def make_fake_server(host: str = "127.0.0.1", port: int = 8790, token: str = DEF
 def suggested_settings(dataset: Dataset) -> dict:
     """Obeya settings that match this fake instance."""
     return {
-        "jira": {"piField": PI_FIELD, "storyPointsField": STORY_POINTS, "boardId": 1, "showSummaries": True},
+        "jira": {"piField": PI_FIELD, "storyPointsField": STORY_POINTS, "boardId": 1, "showSummaries": True,
+                 "showAssignees": True,
+                 "blocked": {"flagged": True, "statuses": [], "labels": [], "links": True}},
         "pis": dataset.pis,
     }
 

@@ -21,7 +21,9 @@ HISTORY_DAYS = 180
 CHUNK = 400  # ids per IN (...) list; old SQLite builds allow 999 parameters
 
 DEFAULT_SETTINGS = {
-    "jira": {"piField": "", "storyPointsField": "", "boardId": None, "showSummaries": True},
+    "jira": {"piField": "", "storyPointsField": "", "boardId": None, "showSummaries": True,
+             "showAssignees": True,
+             "blocked": {"flagged": True, "statuses": [], "labels": [], "links": False}},
     "pis": [],
 }
 
@@ -179,7 +181,7 @@ class Database:
     def get_settings(self) -> dict:
         with self.connect(write=False) as conn:
             row = conn.execute("SELECT doc FROM settings WHERE id = ?", (ROOM_ID,)).fetchone()
-        return self._load(row["doc"]) if row else {"jira": dict(DEFAULT_SETTINGS["jira"]), "pis": []}
+        return self._load(row["doc"]) if row else json.loads(json.dumps(DEFAULT_SETTINGS))
 
     def save_settings(self, doc: dict) -> None:
         with self.connect() as conn:

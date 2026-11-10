@@ -2,6 +2,8 @@
 // Not part of the build. Usage: node dev/mock-server.mjs [port]   (default 8799)
 // Then: OBEYA_API=http://localhost:8799 npm run dev
 // State lives in memory. Jira answers are invented from the issue key.
+// Invented on purpose, so every state can be seen: board 1 has a blocked card, a column over its WIP limit and a
+// column with "+N more"; a cycle_time KPI has nothing to measure; an unplanned KPI fails; board 404 fails.
 import { createServer } from "node:http";
 
 const port = Number(process.argv[2]) || 8799;
@@ -10,7 +12,7 @@ const day = (n) => iso(new Date(Date.now() + n * 86400000));
 
 let room = null, version = 0, updatedAt = null;
 let settings = {
-  jira: { piField: "customfield_10500", storyPointsField: "", boardId: 7, showSummaries: true },
+  jira: { piField: "customfield_10500", storyPointsField: "", boardId: 1, showSummaries: true, showAssignees: true, blocked: { flagged: true, statuses: [], labels: [], links: false } },
   pis: [{ name: "PI 26.4", start: day(-36), end: day(33) }],
 };
 const TITLES = ["Feature proposal pipeline", "Data platform modernization", "Sign-in and access", "Audit trail", "Review workflow", "Template library"];
@@ -43,11 +45,58 @@ const forAuto = (a) => {
   return { ok: true, bars: Array.from({ length: n }, (_, i) => fake(`PLAT-${10 + i}`, a.measure, TITLES[i % TITLES.length])), truncated: a.limit < 6, fetchedAt: new Date().toISOString() };
 };
 
+const BOARDS = [{ id: 1, name: "Platform board", type: "scrum" }, { id: 2, name: "Data kanban", type: "kanban" }];
+const PEOPLE = ["Priya", "Marcus", "Dana", "Joe", "Tom", ""];
+const WORK = ["Proposal upload form", "Review result view", "Template reformatter", "AI review prompt v2", "Proposal schema", "Sign-in spike", "Audit log", "Upload error states", "Approval gate UI", "Jira epic preview", "Repo scaffold", "CI pipeline", "Retry queue", "Access review"];
+
+function card(n, over = {}) {
+  const key = `PLAT-${100 + n}`;
+  return {
+    key, title: settings.jira.showSummaries ? WORK[n % WORK.length] : key, url: `https://jira.example/browse/${key}`, type: n % 5 === 0 ? "Bug" : "Story",
+    assignee: settings.jira.showAssignees ? PEOPLE[n % PEOPLE.length] : "", status: "", points: n % 4 === 3 ? null : [1, 2, 3, 5, 8][n % 5],
+    blocked: false, blockedReason: "", ageDays: n % 7, ...over,
+  };
+}
+
+function forBoard(b) {
+  const fetchedAt = new Date().toISOString();
+  const board = BOARDS.find((x) => x.id === b.boardId);
+  if (!board) return { ok: false, error: `Board ${b.boardId} was not found in Jira.`, boardName: "", boardType: "", sprint: null, columns: [], blocked: 0, total: 0, fetchedAt };
+  if (/syntax error/i.test(b.jql)) return { ok: false, error: "Jira rejected the extra filter: syntax error.", boardName: board.name, boardType: board.type, sprint: null, columns: [], blocked: 0, total: 0, fetchedAt };
+  const cards = (from, n, over) => Array.from({ length: n }, (_, i) => card(from + i, over?.(i) ?? {}));
+  const all = [
+    { name: "Backlog", wip: 0, total: 22, cards: cards(0, 12) },
+    { name: "To do", wip: 0, total: 4, cards: cards(20, 4) },
+    { name: "In progress", wip: 3, total: 5, cards: cards(30, 5, (i) => (i === 1 ? { blocked: true, blockedReason: "Flagged", ageDays: 9 } : i === 3 ? { blocked: true, blockedReason: "Blocked by PLAT-9", ageDays: 4 } : {})) },
+    { name: "Review", wip: 2, total: 2, cards: cards(40, 2, () => ({ ageDays: null })) },
+    { name: "Done", wip: 0, total: b.doneDays ? 14 : 40, cards: cards(50, 12) },
+  ];
+  const hidden = new Set(b.hiddenColumns.map((n) => n.toLowerCase()));
+  const columns = all.filter((c) => !hidden.has(c.name.toLowerCase()));
+  const sprint = board.type === "scrum" && b.sprint === "active" ? { name: "Sprint 14", start: day(-8), end: day(5) } : null;
+  return { ok: true, boardName: board.name, boardType: board.type, sprint, columns, blocked: columns.some((c) => c.name === "In progress") ? 2 : 0, total: columns.reduce((n, c) => n + c.total, 0), fetchedAt };
+}
+
+function forMetric(m) {
+  const fetchedAt = new Date().toISOString();
+  const fail = (error) => ({ ok: false, error, value: null, unit: "", n: 0, detail: "", history: [], fetchedAt });
+  if (m.boardId !== null && !BOARDS.some((b) => b.id === m.boardId)) return fail(`Board ${m.boardId} was not found in Jira.`);
+  if (/syntax error/i.test(m.jql)) return fail("Jira rejected the query: syntax error.");
+  if (m.kind === "unplanned" && m.unplanned.rule === "added_after_start") return fail("The board's sprint report could not be read, so work added after the start is unknown.");
+  if (m.kind === "cycle_time") return { ok: true, value: null, unit: "days", n: 0, detail: `No work was finished in the last ${m.windowDays} days`, history: [], fetchedAt };
+  const series = { lead_time: [12, 11, 9.5, 9, 8, 6.5], throughput: [3, 4, 4, 5, 6, 7], blocked_days: [0, 1, 1, 2, 3, 3], scope_done: [8, 20, 31, 44, 52, 61], wip: [4, 5, 7, 6, 5, 5], blocked_now: [0, 1, 1, 2, 2, 2], unplanned: [5, 8, 9, 12, 12, 13] }[m.kind];
+  const unit = { lead_time: "days", throughput: "/ week", blocked_days: "days", scope_done: "%", wip: m.measure === "points" ? "pts" : "items", blocked_now: "items", unplanned: "%" }[m.kind];
+  const detail = { lead_time: `${m.stat} of 23 items finished in the last ${m.windowDays} days`, throughput: `23 items finished in the last ${m.windowDays} days`, blocked_days: `3 items were blocked in the last ${m.windowDays} days`, scope_done: "37 of 61 points done", wip: "5 items in progress", blocked_now: "2 of 18 open items are blocked", unplanned: "4 of 31 items are unplanned" }[m.kind];
+  return { ok: true, value: series.at(-1), unit, n: 23, detail, history: series.map((value, i) => ({ d: day((i - series.length + 1) * 7), value })), fetchedAt };
+}
+
 function state() {
-  const progress = {}, auto = {};
+  const progress = {}, auto = {}, boards = {}, metrics = {};
   for (const w of room?.walls ?? []) {
     for (const p of w.panels) {
       if (p.type === "portfolio") for (const it of p.data.items) if (it.source) progress[it.id] = forSource(it.source);
+      if (p.type === "kpi") for (const it of p.data.items) if (it.metric) metrics[it.id] = forMetric(it.metric);
+      if (p.type === "kanban" && p.data.jira) boards[p.id] = forBoard(p.data.jira);
       if (p.type === "progress") {
         for (const it of p.data.items) if (it.source.kind !== "manual") progress[it.id] = forSource(it.source);
         if (p.data.auto) auto[p.id] = forAuto(p.data.auto);
@@ -58,7 +107,7 @@ function state() {
   const pis = settings.pis.slice().sort((a, b) => a.start.localeCompare(b.start));
   const pi = pis.find((p) => p.start <= today && today <= p.end) ?? pis.filter((p) => p.start <= today).pop() ?? null;
   return {
-    room, version, updatedAt, progress, auto,
+    room, version, updatedAt, progress, auto, boards, metrics,
     periods: { today, pi, nextPi: pi ? (pis.find((p) => p.start > pi.end) ?? null) : null, sprint: settings.jira.boardId ? { name: "Sprint 14", start: day(-8), end: day(5) } : null },
     sync: { jiraConfigured: true, running: false, lastRunAt: new Date().toISOString(), lastOk: true, lastError: null, intervalSeconds: 300 },
   };
@@ -85,11 +134,11 @@ createServer(async (req, res) => {
         { id: "customfield_10500", name: "Program Increment", custom: true }, { id: "customfield_10106", name: "Story Points", custom: true },
         { id: "customfield_10101", name: "Epic Link", custom: true }, { id: "customfield_10104", name: "Sprint", custom: true }, { id: "summary", name: "Summary", custom: false },
       ]);
-      case "GET /api/jira/boards": return send(200, [{ id: 7, name: "Platform board", type: "scrum" }, { id: 9, name: "Data kanban", type: "kanban" }]);
+      case "GET /api/jira/boards": return send(200, BOARDS);
       case "GET /api/jira/pi-values": return send(200, ["PI 26.3", "PI 26.4", "PI 26.5"]);
       case "POST /api/jira/preview": {
         const body = await read(req);
-        return send(200, body.auto ? forAuto(body.auto) : forSource(body.source));
+        return send(200, body.board ? forBoard(body.board) : body.metric ? forMetric(body.metric) : body.auto ? forAuto(body.auto) : forSource(body.source));
       }
       case "POST /api/sync": return send(200, { ok: true, error: null, sources: 9, durationMs: 840 });
       default: return send(404, { error: "Not found" });

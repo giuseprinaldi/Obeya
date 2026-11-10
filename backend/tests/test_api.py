@@ -30,8 +30,9 @@ def call(base, method, path, body=None, headers=None):
             text = resp.read().decode()
             return resp.status, (json.loads(text) if text else None), resp.headers
     except urllib.error.HTTPError as err:
-        text = err.read().decode()
-        return err.code, (json.loads(text) if text else None), err.headers
+        with err:
+            text = err.read().decode()
+            return err.code, (json.loads(text) if text else None), err.headers
 
 
 def room(*panels):
@@ -97,6 +98,7 @@ class RoomApi(ApiCase):
         s = self.state()
         self.assertIsNone(s["room"])
         self.assertEqual((s["version"], s["updatedAt"], s["progress"], s["auto"]), (0, None, {}, {}))
+        self.assertEqual((s["boards"], s["metrics"]), ({}, {}))
         self.assertEqual(s["periods"]["today"], date.today().isoformat())
         self.assertEqual((s["periods"]["pi"], s["periods"]["sprint"]), (None, None))
         self.assertTrue(s["sync"]["jiraConfigured"])
@@ -162,7 +164,10 @@ class RoomApi(ApiCase):
 class SettingsApi(ApiCase):
     def test_defaults_then_save_cleans_input(self):
         _, body, _ = call(self.base, "GET", "/api/settings")
-        self.assertEqual(body, {"jira": {"piField": "", "storyPointsField": "", "boardId": None, "showSummaries": True}, "pis": []})
+        self.assertEqual(body, {"jira": {"piField": "", "storyPointsField": "", "boardId": None, "showSummaries": True,
+                                         "showAssignees": True,
+                                         "blocked": {"flagged": True, "statuses": [], "labels": [], "links": False}},
+                                "pis": []})
         status, body, _ = call(self.base, "PUT", "/api/settings", {
             "jira": {"piField": " customfield_10500 ", "boardId": "7", "showSummaries": False, "token": "secret"},
             "pis": [{"name": "B", "start": "2027-01-01", "end": "2027-03-31"},
@@ -170,7 +175,9 @@ class SettingsApi(ApiCase):
                     {"name": "Bad", "start": "nope", "end": "2026-12-31"}],
             "extra": 1})
         self.assertEqual(status, 200)
-        self.assertEqual(body["jira"], {"piField": "customfield_10500", "storyPointsField": "", "boardId": None, "showSummaries": False})
+        self.assertEqual(body["jira"], {"piField": "customfield_10500", "storyPointsField": "", "boardId": None, "showSummaries": False,
+                                        "showAssignees": True,
+                                        "blocked": {"flagged": True, "statuses": [], "labels": [], "links": False}})
         self.assertEqual([p["name"] for p in body["pis"]], ["A", "B"])
         self.assertEqual(call(self.base, "GET", "/api/settings")[1], body)
         self.assertEqual(call(self.base, "PUT", "/api/settings", [])[0], 400)
@@ -304,6 +311,77 @@ class JiraApi(ApiCase):
         self.assertEqual(sorted(b["title"] for b in s["auto"]["p1"]["bars"]), ["Access controls", "Audit and reporting"])
 
 
+class FlowApi(ApiCase):
+    def configure(self):
+        call(self.base, "PUT", "/api/settings", suggested_settings(self.fake.dataset))
+
+    def flow_room(self):
+        return room(
+            {"id": "k1", "type": "kanban", "title": "Flow", "span": 3,
+             "data": {"columns": [{"id": "c1", "name": "Manual", "wip": 0}], "cards": [],
+                      "jira": {"boardId": 1, "jql": "", "sprint": "active", "hiddenColumns": [], "maxCards": 6, "doneDays": 14}}},
+            {"id": "k2", "type": "kanban", "title": "Manual board", "span": 3,
+             "data": {"columns": [{"id": "c1", "name": "To do", "wip": 0}], "cards": [], "jira": None}},
+            {"id": "q1", "type": "kpi", "title": "KPIs", "span": 3, "data": {"items": [
+                {"id": "m1", "name": "Scope done", "metric": {"kind": "scope_done", "boardId": 1, "measure": "points"}},
+                {"id": "m2", "name": "Throughput", "metric": {"kind": "throughput", "boardId": 1, "windowDays": 28}},
+                {"id": "m3", "name": "Broken", "metric": {"kind": "wip", "boardId": 99}},
+                {"id": "m4", "name": "Manual", "target": 5, "actual": 4, "history": [1, 2]}]}})
+
+    def test_boards_and_metrics_arrive_in_state(self):
+        self.configure()
+        self.assertEqual(self.save(self.flow_room(), 0)[0], 200)
+        status, summary, _ = call(self.base, "POST", "/api/sync", {})
+        self.assertEqual((status, summary["ok"], summary["sources"]), (200, True, 4))
+        s = self.state()
+        self.assertEqual(sorted(s["boards"]), ["k1"])
+        board = s["boards"]["k1"]
+        self.assertEqual((board["ok"], board["boardName"], len(board["columns"])), (True, "Platform board", 4))
+        self.assertEqual(sorted(s["metrics"]), ["m1", "m2", "m3"])
+        scope = s["metrics"]["m1"]
+        self.assertEqual((scope["ok"], scope["unit"]), (True, "%"))
+        # Right-now metrics get a daily snapshot; look-back metrics bring their own weekly trend.
+        self.assertEqual(scope["history"], [{"d": date.today().isoformat(), "value": scope["value"]}])
+        self.assertGreater(len(s["metrics"]["m2"]["history"]), 1)
+        self.assertFalse(s["metrics"]["m3"]["ok"])
+        self.assertIn("Board 99", s["metrics"]["m3"]["error"])
+
+    def test_lookback_metrics_are_not_recomputed_on_every_sync(self):
+        self.configure()
+        self.save(self.flow_room(), 0)
+        self.assertEqual(self.syncer.run(full=True)["sources"], 4)
+        # The next scheduled run refreshes everything except the fresh look-back metric.
+        self.assertEqual(self.syncer.run(full=True)["sources"], 3)
+        # "Sync now" and a settings change recompute it as well.
+        self.assertEqual(self.syncer.run(full=True, force=True)["sources"], 4)
+        self.assertEqual(sorted(self.state()["metrics"]), ["m1", "m2", "m3"])
+
+    def test_blocked_rule_from_settings_reaches_the_board(self):
+        self.configure()
+        self.save(self.flow_room(), 0)
+        self.syncer.run(full=True)
+        self.assertEqual(self.state()["boards"]["k1"]["blocked"], 2)
+        settings = suggested_settings(self.fake.dataset)
+        settings["jira"]["blocked"] = {"flagged": False, "statuses": [], "labels": [], "links": False}
+        settings["jira"]["showAssignees"] = False
+        status, saved, _ = call(self.base, "PUT", "/api/settings", settings)
+        self.assertEqual((status, saved["jira"]["blocked"]["flagged"], saved["jira"]["showAssignees"]), (200, False, False))
+        self.syncer.run(full=True, force=True)
+        board = self.state()["boards"]["k1"]
+        self.assertEqual(board["blocked"], 0)
+        self.assertTrue(all(card["assignee"] == "" for col in board["columns"] for card in col["cards"]))
+
+    def test_preview_board_and_metric(self):
+        self.configure()
+        status, body, _ = call(self.base, "POST", "/api/jira/preview", {"board": {"boardId": 2}})
+        self.assertEqual((status, body["ok"], body["boardType"]), (200, True, "kanban"))
+        status, body, _ = call(self.base, "POST", "/api/jira/preview",
+                               {"metric": {"kind": "lead_time", "jql": "project = DATA", "windowDays": 60}})
+        self.assertEqual((status, body["ok"], body["unit"]), (200, True, "days"))
+        self.assertEqual(call(self.base, "POST", "/api/jira/preview", {"board": {"boardId": None}})[0], 400)
+        self.assertEqual(call(self.base, "POST", "/api/jira/preview", {"metric": {"kind": "wip"}})[0], 400)
+
+
 class WithoutJira(ApiCase):
     jira = False
 
@@ -321,7 +399,7 @@ class WithoutJira(ApiCase):
 
 
 if os.environ.get("OBEYA_TEST_DATABASE_URL"):
-    for _case in (RoomApi, SettingsApi, JiraApi, WithoutJira):
+    for _case in (RoomApi, SettingsApi, JiraApi, FlowApi, WithoutJira):
         globals()[_case.__name__ + "Postgres"] = type(_case.__name__ + "Postgres", (_case,), {"postgres": True})
 
 

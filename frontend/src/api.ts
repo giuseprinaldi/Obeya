@@ -1,9 +1,11 @@
 /* HTTP client for the Obeya API. Same origin; every error body is {error}. */
 import type {
   AutoResult,
+  BoardResult,
   JiraBoard,
   JiraField,
   JiraStatus,
+  MetricResult,
   PreviewRequest,
   ProgressResult,
   SaveRoomConflict,
@@ -63,6 +65,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 /** On a conflict the server sends back its own room, which is null if it holds none. */
 export type SaveOutcome = { kind: "saved"; version: number; updatedAt: string } | { kind: "conflict"; version: number; room: unknown };
 
+/** The answer to a preview: which one depends on what was asked. */
+export type PreviewResult = ProgressResult | AutoResult | BoardResult | MetricResult;
+
 export const api = {
   getState: (): Promise<ServerState> => request<ServerState>("GET", "/api/state"),
 
@@ -85,6 +90,6 @@ export const api = {
   jiraFields: (): Promise<JiraField[]> => request<JiraField[]>("GET", "/api/jira/fields"),
   jiraBoards: (): Promise<JiraBoard[]> => request<JiraBoard[]>("GET", "/api/jira/boards"),
   piValues: (): Promise<string[]> => request<string[]>("GET", "/api/jira/pi-values"),
-  preview: (req: PreviewRequest): Promise<ProgressResult | AutoResult> => request<ProgressResult | AutoResult>("POST", "/api/jira/preview", req),
+  preview: (req: PreviewRequest): Promise<PreviewResult> => request<PreviewResult>("POST", "/api/jira/preview", req),
   sync: (): Promise<SyncResponse> => request<SyncResponse>("POST", "/api/sync"),
 };

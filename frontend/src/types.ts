@@ -71,6 +71,58 @@ export interface BarDisplay {
   pace: Pace;
 }
 
+/* ---------- Jira flow boards and KPIs ---------- */
+
+/** A flow board fed by a Jira board: columns, WIP limits and cards all come from Jira. */
+export interface BoardSource {
+  boardId: number;
+  /** Extra JQL to narrow the board. May use the PI variables. "" = everything on the board. */
+  jql: string;
+  /** Scrum boards: only the active sprint, or everything on the board. Kanban boards ignore this. */
+  sprint: "active" | "all";
+  /** Names of board columns to leave out (for example "Backlog"). */
+  hiddenColumns: string[];
+  /** Cards shown per column before "+N more". 1-30. */
+  maxCards: number;
+  /** Last column: only show work finished in the last N days. 0 = no limit. */
+  doneDays: number;
+}
+
+export type MetricKind =
+  | "cycle_time" // days from first "in progress" to done, for work finished in the window
+  | "lead_time" // days from created to done, for work finished in the window
+  | "throughput" // items finished per week, averaged over the window
+  | "blocked_days" // total days items spent blocked (flagged or in a blocked status) in the window
+  | "scope_done" // % of the scope that is done right now
+  | "wip" // items in progress right now
+  | "blocked_now" // items blocked right now
+  | "unplanned"; // % of the scope that is unplanned
+
+/** How "unplanned" is decided for the unplanned metric. */
+export type UnplannedRule =
+  | { rule: "added_after_start" } // joined the active sprint after it started (needs boardId)
+  | { rule: "labels"; values: string[] } // has one of these labels
+  | { rule: "types"; values: string[] }; // is one of these issue types
+
+/** A KPI whose value is worked out from Jira. Sub-tasks are never counted. */
+export interface Metric {
+  kind: MetricKind;
+  /** Scope: a board, a JQL query, or both (the query then narrows the board). At least one
+      is required. On a scrum board the right-now metrics (scope_done, wip, blocked_now,
+      unplanned) look at the active sprint; the look-back metrics look at the whole board. */
+  boardId: number | null;
+  jql: string;
+  /** Look-back in days for cycle_time, lead_time, throughput and blocked_days. 7-365. */
+  windowDays: number;
+  /** cycle_time and lead_time: which figure to report. */
+  stat: "median" | "average" | "p85";
+  /** scope_done, wip and unplanned: count issues or sum story points. */
+  measure: Measure;
+  /** Status names that count as done. Empty = the "Done" status category in Jira. */
+  doneStatuses: string[];
+  unplanned: UnplannedRule;
+}
+
 /* ---------- Room document ---------- */
 
 export interface KpiItem {
@@ -81,6 +133,10 @@ export interface KpiItem {
   actual: number | "";
   dir: "up" | "down";
   history: number[];
+  /** Optional Jira metric. While it is set, the value and trend shown come from Jira and
+      the hand-entered `actual` and `history` are kept but not shown, even when Jira has no
+      answer yet. Target and direction stay manual. */
+  metric?: Metric | null;
 }
 
 export interface PortfolioItem {
@@ -173,7 +229,12 @@ export interface ActionsPanel extends PanelBase {
 }
 export interface KanbanPanel extends PanelBase {
   type: "kanban";
-  data: { columns: KanbanColumn[]; cards: KanbanCard[] };
+  data: {
+    columns: KanbanColumn[];
+    cards: KanbanCard[];
+    /** When set, the board is read-only and shows the Jira board instead of columns/cards. */
+    jira?: BoardSource | null;
+  };
 }
 export interface ProgressPanel extends PanelBase {
   type: "progress";
@@ -265,6 +326,73 @@ export interface AutoResult {
   fetchedAt: string;
 }
 
+export interface BoardCard {
+  key: string;
+  /** Jira summary, or the key when summaries are switched off. */
+  title: string;
+  url: string;
+  type: string;
+  /** Display name, or "" when unassigned or when assignees are switched off. */
+  assignee: string;
+  status: string;
+  points: number | null;
+  blocked: boolean;
+  /** Why it counts as blocked, e.g. "Flagged" or "Blocked by PLAT-9". "" when not blocked. */
+  blockedReason: string;
+  /** Whole days in the current status category. Null when Jira does not report it. */
+  ageDays: number | null;
+}
+
+export interface BoardColumn {
+  name: string;
+  /** WIP limit from the Jira board. 0 = none. */
+  wip: number;
+  /** Issues in the column, which can be more than cards.length. */
+  total: number;
+  /** In board order; at most 30. The frontend trims to BoardSource.maxCards. */
+  cards: BoardCard[];
+}
+
+/** Result for one Jira-fed flow board. When ok is false only `error` is meaningful. */
+export interface BoardResult {
+  ok: boolean;
+  error?: string;
+  boardName: string;
+  /** "scrum" or "kanban". */
+  boardType: string;
+  /** The sprint shown, for scrum boards in "active" mode. */
+  sprint: Period | null;
+  columns: BoardColumn[];
+  /** Blocked issues that are not in the last column. */
+  blocked: number;
+  /** All issues across the visible columns. */
+  total: number;
+  fetchedAt: string;
+}
+
+export interface MetricPoint {
+  /** ISO date. */
+  d: string;
+  value: number;
+}
+
+/** Result for one Jira KPI. When ok is false only `error` is meaningful. */
+export interface MetricResult {
+  ok: boolean;
+  error?: string;
+  /** Null when there is nothing to measure yet (for example no work finished in the window). */
+  value: number | null;
+  /** Suggested unit: "days", "/ week", "%", "items" or "pts". */
+  unit: string;
+  /** How many issues the value is based on. */
+  n: number;
+  /** One line explaining the number, e.g. "23 items finished in the last 30 days". */
+  detail: string;
+  /** Oldest first. Weekly points for the look-back metrics, daily snapshots for the rest. */
+  history: MetricPoint[];
+  fetchedAt: string;
+}
+
 export interface Period {
   name: string;
   /** ISO dates, inclusive. */
@@ -301,6 +429,10 @@ export interface ServerState {
   progress: Record<string, ProgressResult>;
   /** Keyed by ProgressPanel.id. */
   auto: Record<string, AutoResult>;
+  /** Keyed by KanbanPanel.id, for boards with a Jira source. Missing = not fetched yet. */
+  boards: Record<string, BoardResult>;
+  /** Keyed by KpiItem.id, for KPIs with a metric. Missing = not fetched yet. */
+  metrics: Record<string, MetricResult>;
   periods: Periods;
   sync: SyncInfo;
 }
@@ -323,6 +455,17 @@ export interface SaveRoomConflict {
   room: Room;
 }
 
+export interface BlockedRule {
+  /** The Flagged field in Jira (the "Add flag" action on a board). */
+  flagged: boolean;
+  /** Status names that mean blocked, e.g. "Blocked", "On hold". */
+  statuses: string[];
+  /** Labels that mean blocked. */
+  labels: string[];
+  /** Has an "is blocked by" link to an issue that is not done. */
+  links: boolean;
+}
+
 /** GET and PUT /api/settings */
 export interface Settings {
   jira: {
@@ -332,8 +475,12 @@ export interface Settings {
     storyPointsField: string;
     /** Board whose active sprint drives sprint pace. Null = none. */
     boardId: number | null;
-    /** When false, Jira summaries never leave the server; bars show keys only. */
+    /** When false, Jira summaries never leave the server; bars and cards show keys only. */
     showSummaries: boolean;
+    /** When false, assignee names never leave the server. */
+    showAssignees: boolean;
+    /** What counts as blocked, for cards and the blocked metrics. Any one rule is enough. */
+    blocked: BlockedRule;
   };
   /** The PI calendar. Order does not matter. */
   pis: Period[];
@@ -363,10 +510,13 @@ export interface JiraBoard {
   type: string;
 }
 
-/** POST /api/jira/preview body: exactly one of source or auto. */
+/** POST /api/jira/preview body: exactly one of the four. The response is the matching
+    result type: ProgressResult, AutoResult, BoardResult or MetricResult. */
 export interface PreviewRequest {
   source?: JiraSource;
   auto?: AutoSource;
+  board?: BoardSource;
+  metric?: Metric;
 }
 
 /** POST /api/sync response. */

@@ -1,4 +1,5 @@
-/* Jira keys and the JQL presets offered in the editor. */
+/* Jira keys, the JQL presets offered in the editor, and defaults for the Jira settings. */
+import type { Settings } from "../types";
 
 const KEY = "[A-Za-z][A-Za-z0-9_]*-\\d+";
 const BARE = new RegExp(`^${KEY}$`);
@@ -35,4 +36,30 @@ export function parseStatusList(text: string): string[] {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+type Loose<T> = { [K in keyof T]?: T[K] | null };
+
+/** Settings as the page uses them. A server from before a setting existed leaves it out, so the
+    defaults are filled in here: flagged issues count as blocked, and assignee names are shown. */
+export function withSettingsDefaults(raw: { jira?: Loose<Settings["jira"]> | null; pis?: Settings["pis"] | null } | null | undefined): Settings {
+  const j = raw?.jira ?? {};
+  const b: Loose<Settings["jira"]["blocked"]> = j.blocked ?? {};
+  const list = (x: unknown): string[] => (Array.isArray(x) ? x.map((v) => String(v).trim()).filter(Boolean) : []);
+  return {
+    jira: {
+      piField: j.piField ?? "",
+      storyPointsField: j.storyPointsField ?? "",
+      boardId: typeof j.boardId === "number" ? j.boardId : null,
+      showSummaries: j.showSummaries ?? true,
+      showAssignees: j.showAssignees ?? true,
+      blocked: {
+        flagged: b.flagged ?? true,
+        statuses: list(b.statuses),
+        labels: list(b.labels),
+        links: b.links ?? false,
+      },
+    },
+    pis: Array.isArray(raw?.pis) ? raw.pis : [],
+  };
 }

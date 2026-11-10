@@ -201,13 +201,32 @@ class Links(unittest.TestCase):
             {"id": "p3", "type": "kpi", "data": {"items": [{"id": "k1", "source": {"kind": "issue", "key": "X-1"}}]}},
             "junk",
         ]}, "junk"]}
-        specs, items, autos = collect_links(room)
-        self.assertEqual(sorted(items), ["b1", "b3", "i1"])
-        self.assertEqual(items["b1"], items["b3"])   # the same link is fetched once
-        self.assertEqual(list(autos), ["p1"])
-        self.assertEqual(len(specs), 3)
-        self.assertEqual(collect_links(None), ({}, {}, {}))
-        self.assertEqual(collect_links({"walls": "nope"}), ({}, {}, {}))
+        links = collect_links(room)
+        self.assertEqual(sorted(links.items), ["b1", "b3", "i1"])
+        self.assertEqual(links.items["b1"], links.items["b3"])   # the same link is fetched once
+        self.assertEqual(list(links.autos), ["p1"])
+        self.assertEqual(len(links.specs), 3)
+        self.assertEqual((links.boards, links.metrics), ({}, {}))
+        self.assertEqual(collect_links(None).specs, {})
+        self.assertEqual(collect_links({"walls": "nope"}).specs, {})
+
+    def test_collect_boards_and_metrics(self):
+        room = {"walls": [{"id": "w", "panels": [
+            {"id": "k1", "type": "kanban", "data": {"columns": [], "cards": [], "jira": {"boardId": 7, "maxCards": 4}}},
+            {"id": "k2", "type": "kanban", "data": {"columns": [], "cards": [], "jira": None}},
+            {"id": "k3", "type": "kanban", "data": {"columns": [], "cards": [], "jira": {"boardId": 7, "maxCards": 9}}},
+            {"id": "q1", "type": "kpi", "data": {"items": [
+                {"id": "m1", "metric": {"kind": "cycle_time", "boardId": 7}},
+                {"id": "m2", "metric": {"kind": "cycle_time", "boardId": None, "jql": ""}},   # no scope
+                {"id": "m3", "metric": {"kind": "nonsense", "boardId": 7}},
+                {"id": "m4"},
+            ]}},
+        ]}]}
+        links = collect_links(room)
+        self.assertEqual(sorted(links.boards), ["k1", "k3"])
+        self.assertEqual(links.boards["k1"], links.boards["k3"])   # cards-per-column is display only
+        self.assertEqual(list(links.metrics), ["m1"])
+        self.assertEqual(len(links.specs), 2)
 
 
 if __name__ == "__main__":

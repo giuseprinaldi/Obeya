@@ -2,7 +2,9 @@
 import type {
   AutoResult,
   BarDisplay,
+  BoardResult,
   JiraSourceOptions,
+  MetricResult,
   Pace,
   Periods,
   PortfolioItem,
@@ -17,6 +19,10 @@ import { clamp, daysBetween, fmtNum } from "./util";
 export interface LiveData {
   progress: Record<string, ProgressResult>;
   auto: Record<string, AutoResult>;
+  /** Jira-fed flow boards, keyed by panel id. */
+  boards: Record<string, BoardResult>;
+  /** Jira-fed KPIs, keyed by KPI id. */
+  metrics: Record<string, MetricResult>;
   periods: Periods;
   jiraConfigured: boolean;
 }

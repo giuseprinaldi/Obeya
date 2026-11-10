@@ -1,6 +1,7 @@
 /* Display mode: how much height each row of panels needs, so a TV shares its height by content
    instead of giving every row the same amount. Estimates are in stage pixels and only need to be roughly right. */
 import type { Panel } from "../types";
+import { boardHeight, boardView } from "./board";
 import { resolveBars, type LiveData } from "./progress";
 
 const FRAME = 80; // panel title bar plus body padding
@@ -42,6 +43,9 @@ function need(p: Panel, live: LiveData): number {
       return FRAME + n * (p.span === 2 ? 56 : 78);
     }
     case "kanban": {
+      const board = boardView(p, live);
+      // A Jira board has a line under it; its cards measure about 60px with their gap.
+      if (board) return FRAME + 50 + 24 + Math.max(1, boardHeight(board)) * 60;
       const tallest = Math.max(0, ...p.data.columns.map((c) => p.data.cards.filter((x) => x.col === c.id).length));
       return FRAME + 50 + Math.max(1, tallest) * 64;
     }

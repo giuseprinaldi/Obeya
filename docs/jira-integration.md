@@ -4,9 +4,18 @@ The Jira pull runs on the VM backend, not in the browser. A Python service polls
 
 ## Status
 
-Built: Jira-linked progress bars (issue, query and auto-fill links), the sync job, the PI calendar and the Jira settings screen. See `architecture.md` for how it works and what is still untested against real Jira.
+Built: Jira-linked progress bars (issue, query and auto-fill links), flow boards read from Jira boards, KPIs worked out from Jira, the sync job, the PI calendar and the Jira settings screen. See `architecture.md` for how each works and what is still untested against real Jira.
 
-Not built: flow boards and flow KPIs from Jira. Items 4, 6 and 7 below are only needed for those.
+Most of the discovery table below is now answered inside the app instead of up front:
+
+- Item 3 (boards): picked from a list on each flow board and KPI.
+- Item 4 (status to column mapping): read from the Jira board's own configuration.
+- Item 5 (field IDs): found automatically, except the PI field, which is picked from a list.
+- Item 6 ("blocked"): set under "Blocked means" in Jira settings.
+- Item 7 (KPI rules): chosen per KPI; see the metric table in `architecture.md`.
+- Item 8 (what may appear on screens): summaries and assignee names can each be switched off.
+
+Items 1 and 2 (Jira type, base URL, token and network path) are still needed to connect at all.
 
 Design constraints:
 
@@ -54,7 +63,9 @@ Done:
 - Tables for the room, settings, link results, daily history and sync runs (SQLite by default, Postgres optional)
 - `docs/architecture.md`: API, data model, configuration and deployment notes for the VM build
 
+- Flow boards from Jira boards, and KPIs from issue histories (`backend/obeya/flow.py`)
+
 Still to do:
 
-- Flow boards and flow KPIs from Jira: status-to-column mapping, "blocked" rule, cycle and lead time from the change history
-- KPI snapshots feeding the KPI sparklines
+- Check all of the above against the real Jira instance from the VM
+- GitLab metrics

@@ -64,6 +64,9 @@ class JiraClient:
         self._deployment: Optional[str] = None
         self._fields: Optional[list[dict]] = None
         self._fields_at = 0.0
+        self._categories: Optional[dict[str, str]] = None
+        self._categories_at = 0.0
+        self._board_configs: dict[int, tuple[float, dict]] = {}
 
     # ---- transport ----
 
@@ -131,7 +134,8 @@ class JiraClient:
 
     def discovered_fields(self) -> dict:
         """Find the instance-specific ids of the fields the hierarchy walk needs."""
-        found: dict[str, Optional[dict]] = {"epic_link": None, "parent_link": None, "story_points": None}
+        found: dict[str, Optional[dict]] = {"epic_link": None, "parent_link": None, "story_points": None,
+                                            "sprint": None, "flagged": None}
         named_points: Optional[dict] = None
         for f in self.fields():
             custom = str((f.get("schema") or {}).get("custom") or "")
@@ -142,22 +146,38 @@ class JiraClient:
                 found["parent_link"] = entry
             elif custom.endswith(":jsw-story-points"):
                 found["story_points"] = entry
+            elif custom.endswith(":gh-sprint"):
+                found["sprint"] = entry
             name = str(f.get("name") or "").strip().lower()
+            if name == "flagged" and f.get("custom"):
+                found["flagged"] = entry
             if name == "story points" or (name == "story point estimate" and named_points is None):
                 named_points = entry
         if named_points and (found["story_points"] is None or str(named_points["name"]).lower() == "story points"):
             found["story_points"] = named_points
         return found
 
+    def status_categories(self) -> dict[str, str]:
+        """Status id -> category key ("new", "indeterminate" or "done"), for reading histories."""
+        with self._lock:
+            if self._categories is None or time.time() - self._categories_at > FIELD_CACHE_SECONDS:
+                statuses = self._request("GET", "/rest/api/2/status") or []
+                self._categories = {str(s.get("id")): str((s.get("statusCategory") or {}).get("key") or "")
+                                    for s in statuses if s.get("id") is not None}
+                self._categories_at = time.time()
+            return self._categories
+
     # ---- search ----
 
-    def search(self, jql: str, fields: list[str], limit: int = 2000) -> tuple[list[dict], bool]:
+    def search(self, jql: str, fields: list[str], limit: int = 2000, changelog: bool = False) -> tuple[list[dict], bool]:
         """Run a JQL search. Returns (issues, truncated)."""
         issues: list[dict] = []
         if self.is_cloud():
             token = None
             while True:
                 body: dict[str, Any] = {"jql": jql, "maxResults": min(PAGE_SIZE, limit - len(issues)), "fields": fields}
+                if changelog:
+                    body["expand"] = "changelog"
                 if token:
                     body["nextPageToken"] = token
                 page = self._request("POST", "/rest/api/3/search/jql", body=body) or {}
@@ -170,6 +190,8 @@ class JiraClient:
         start = 0
         while True:
             body = {"jql": jql, "startAt": start, "maxResults": min(PAGE_SIZE, limit - len(issues)), "fields": fields}
+            if changelog:
+                body["expand"] = ["changelog"]
             page = self._request("POST", "/rest/api/2/search", body=body) or {}
             batch = page.get("issues") or []
             issues.extend(batch)
@@ -193,6 +215,39 @@ class JiraClient:
             if not values or page.get("isLast", True):
                 break
         return out
+
+    def board_config(self, board_id: int) -> dict:
+        """Name, type, columns (with their statuses and WIP limits) and sub-query of a board."""
+        board_id = int(board_id)
+        with self._lock:
+            cached = self._board_configs.get(board_id)
+            if cached and time.time() - cached[0] < 600:
+                return cached[1]
+        config = self._request("GET", f"/rest/agile/1.0/board/{board_id}/configuration") or {}
+        with self._lock:
+            self._board_configs[board_id] = (time.time(), config)
+        return config
+
+    def board_issues(self, board_id: int, jql: str, fields: list[str], limit: int = 1000,
+                     changelog: bool = False) -> tuple[list[dict], bool]:
+        """Issues on a board, in board order, optionally narrowed by JQL. Returns (issues, truncated)."""
+        issues: list[dict] = []
+        start = 0
+        while True:
+            params: dict[str, Any] = {"startAt": start, "maxResults": min(PAGE_SIZE, limit - len(issues)),
+                                      "fields": ",".join(fields)}
+            if jql:
+                params["jql"] = jql
+            if changelog:
+                params["expand"] = "changelog"
+            page = self._request("GET", f"/rest/agile/1.0/board/{int(board_id)}/issue", params) or {}
+            batch = page.get("issues") or []
+            issues.extend(batch)
+            start += len(batch)
+            if not batch or start >= int(page.get("total") or 0):
+                return issues, False
+            if len(issues) >= limit:
+                return issues[:limit], True
 
     def active_sprint(self, board_id: int) -> Optional[dict]:
         page = self._request("GET", f"/rest/agile/1.0/board/{int(board_id)}/sprint", {"state": "active"}) or {}

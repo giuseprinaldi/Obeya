@@ -17,7 +17,7 @@ const periods = (over: Partial<Periods> = {}): Periods => ({
   ...over,
 });
 
-const live = (over: Partial<LiveData> = {}): LiveData => ({ progress: {}, auto: {}, periods: periods(), jiraConfigured: true, ...over });
+const live = (over: Partial<LiveData> = {}): LiveData => ({ progress: {}, auto: {}, boards: {}, metrics: {}, periods: periods(), jiraConfigured: true, ...over });
 
 const result = (over: Partial<ProgressResult> = {}): ProgressResult => ({
   ok: true,
@@ -243,7 +243,7 @@ describe("signals", () => {
     const panel = progressPanel({ items: [issueBar({ id: "a", pace: { kind: "pi" } }), issueBar({ id: "b", pace: { kind: "pi" } }), issueBar({ id: "c" })] });
     const l = live({ progress: { a: result({ done: 5 }), b: result({ done: 20 }), c: result({ ok: false, error: "x" }) } });
     const s = signals([panel], l);
-    expect(s).toMatchObject({ barBad: 1, barWarn: 1, barError: 1 });
+    expect(s).toMatchObject({ barBad: 1, barWarn: 1, jiraFailing: 1 });
     expect(badCount(s)).toBe(1);
     expect(panelStatus(panel, l)).toBe("bad");
     expect(chipList(s).map((c) => c.text)).toEqual(["1 behind pace", "1 at risk", "1 Jira link failing"]);
@@ -254,10 +254,11 @@ describe("signals", () => {
     expect(isLate({ id: "a", text: "", owner: "", due: "2026-11-10", done: false }, "2026-11-10")).toBe(false);
     expect(isLate({ id: "a", text: "", owner: "", due: "2026-11-01", done: true }, "2026-11-10")).toBe(false);
   });
-  it("matches the prototype's totals for the example room", () => {
+  it("counts only the hand-entered parts of the example room while Jira is not connected", () => {
+    // Three KPIs on each of two walls and the delivery flow board read from Jira, so they add nothing here.
     const room = seed("program");
     const s = signals(room.walls.flatMap((w) => w.panels), live({ jiraConfigured: false, periods: periods({ today: todayISO() }) }));
-    expect(s).toMatchObject({ kpiBad: 4, off: 1, risk: 1, blocked: 1, openHigh: 1, late: 1, barBad: 0 });
+    expect(s).toMatchObject({ kpiBad: 1, kpiWarn: 2, off: 1, risk: 1, blocked: 0, overWip: 0, openHigh: 1, late: 1, barBad: 0, jiraFailing: 0 });
   });
 });
 

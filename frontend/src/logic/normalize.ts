@@ -5,10 +5,13 @@ import type {
   AutoSource,
   BarColor,
   BarDisplay,
+  BoardSource,
   JiraSource,
   JiraSourceOptions,
   KanbanColumn,
   Measure,
+  Metric,
+  MetricKind,
   Pace,
   Panel,
   ProgressSort,
@@ -18,10 +21,13 @@ import type {
   Span,
   Stage,
   Theme,
+  UnplannedRule,
   ValueFormat,
   Wall,
 } from "../types";
+import { MAX_CARDS_MAX, MAX_CARDS_MIN } from "./board";
 import { parseIssueKey } from "./jira";
+import { METRIC_KINDS, WINDOW_MAX, WINDOW_MIN } from "./kpi";
 import { defaultDisplay } from "./progress";
 import { clamp, uid } from "./util";
 
@@ -91,6 +97,48 @@ function autoSource(x: unknown): AutoSource | null {
   return { jql, limit: clamp(Math.round(num(x.limit, 12)), 1, 100), ...jiraOptions(x) };
 }
 
+const strList = (x: unknown): string[] => arr(x).map((s) => str(s).trim()).filter(Boolean);
+
+function unplannedRule(x: unknown): UnplannedRule {
+  if (isObj(x) && (x.rule === "labels" || x.rule === "types")) return { rule: x.rule, values: strList(x.values) };
+  return { rule: "added_after_start" };
+}
+
+/** The Jira metric of a KPI, or null when it is missing or not usable (unknown kind, or no scope at all). */
+function metric(x: unknown): Metric | null {
+  if (!isObj(x)) return null;
+  if (typeof x.kind !== "string" || !(METRIC_KINDS as string[]).includes(x.kind)) return null;
+  const board = num(x.boardId, NaN);
+  const boardId = x.boardId === null || x.boardId === undefined || isNaN(board) ? null : board;
+  const jql = str(x.jql).trim();
+  if (boardId === null && !jql) return null;
+  return {
+    kind: x.kind as MetricKind,
+    boardId,
+    jql,
+    windowDays: clamp(Math.round(num(x.windowDays, 30)), WINDOW_MIN, WINDOW_MAX),
+    stat: oneOf(x.stat, ["median", "average", "p85"] as const, "median"),
+    measure: oneOf(x.measure, MEASURES, "count"),
+    doneStatuses: strList(x.doneStatuses),
+    unplanned: unplannedRule(x.unplanned),
+  };
+}
+
+/** The Jira source of a flow board, or null when it is missing or names no board. */
+function boardSource(x: unknown): BoardSource | null {
+  if (!isObj(x)) return null;
+  const boardId = num(x.boardId, NaN);
+  if (isNaN(boardId)) return null;
+  return {
+    boardId,
+    jql: str(x.jql).trim(),
+    sprint: x.sprint === "all" ? "all" : "active",
+    hiddenColumns: strList(x.hiddenColumns),
+    maxCards: clamp(Math.round(num(x.maxCards, 6)), MAX_CARDS_MIN, MAX_CARDS_MAX),
+    doneDays: Math.max(0, Math.round(num(x.doneDays, 14))),
+  };
+}
+
 function pace(x: unknown): Pace {
   if (!isObj(x)) return { kind: "none" };
   if (x.kind === "sprint" || x.kind === "pi") return { kind: x.kind };
@@ -128,6 +176,7 @@ function panel(x: Obj): Panel | null {
             actual: numOrBlank(k.actual),
             dir: k.dir === "down" ? "down" : "up",
             history: arr(k.history).map((h) => num(h, NaN)).filter((h) => !isNaN(h)),
+            metric: metric(k.metric),
           })),
         },
       };
@@ -185,6 +234,7 @@ function panel(x: Obj): Panel | null {
             const col = str(c.col);
             return { id: id(c.id), title: str(c.title), owner: str(c.owner), tag: str(c.tag), col: ids.has(col) ? col : first, blocked: c.blocked === true };
           }),
+          jira: boardSource(d.jira),
         },
       };
     }

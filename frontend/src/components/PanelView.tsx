@@ -1,14 +1,15 @@
 /* One panel on a wall: the frame (title, status stripe, tools) and the body for each panel type. */
 import { useState, type CSSProperties, type DragEvent } from "react";
+import { boardView, type BoardCardView } from "../logic/board";
+import { effectiveKpi } from "../logic/kpi";
 import { barColor, barPill, portfolioProgress, resolveBars, valueText, type BarView, type LiveData } from "../logic/progress";
 import { PANEL_TYPES, STAGES, itemNoun } from "../logic/seed";
-import { isLate, kpiStatus, panelStatus } from "../logic/status";
+import { isLate, panelStatus } from "../logic/status";
 import { clamp, fmtDate, fmtNum } from "../logic/util";
 import { store } from "../store";
 import type {
   ActionsPanel,
   KanbanPanel,
-  KpiItem,
   KpiPanel,
   Panel,
   PortfolioPanel,
@@ -75,33 +76,46 @@ function Spark({ history, target }: { history: number[]; target: number | "" }) 
   );
 }
 
-function trend(k: KpiItem): string {
-  const h = k.history.map(Number).filter(isFinite);
-  if (h.length < 2) return "";
-  const diff = h[h.length - 1]! - h[h.length - 2]!;
-  if (Math.abs(diff) < 1e-9) return "→";
-  return diff > 0 ? "▲" : "▼";
-}
-
-function KpiBody({ panel }: BodyProps<KpiPanel>) {
+function KpiBody({ panel, live }: BodyProps<KpiPanel>) {
   const ui = useUi();
   if (!panel.data.items.length) return <p className="empty">No KPIs yet. Add one to start tracking against a target.</p>;
   return (
     <div className="kpis">
-      {panel.data.items.map((k) => (
-        <button key={k.id} type="button" className={`kpi st-${kpiStatus(k)}`} onClick={() => ui.open({ kind: "item", panelId: panel.id, itemId: k.id })}>
-          <span className="name">{k.name}</span>
-          <span className="val">
-            <span className="big">{fmtNum(k.actual)}</span>
-            <span className="unit">{k.unit}</span>
-            <span className="trend">{trend(k)}</span>
-          </span>
-          <span className="tgt">
-            Target {k.dir === "down" ? "≤" : "≥"} {fmtNum(k.target)} {k.unit}
-          </span>
-          <Spark history={k.history} target={k.target} />
-        </button>
-      ))}
+      {panel.data.items.map((k) => {
+        // effectiveKpi decides the value, unit, history, status and trend, whether hand-entered or from Jira.
+        const e = effectiveKpi(k, live);
+        const waiting = e.state === "loading" || e.state === "disconnected" || e.state === "error";
+        return (
+          <button
+            key={k.id}
+            type="button"
+            className={`kpi st-${e.state === "error" ? "warn" : e.status}${e.state === "error" ? " is-error" : ""}`}
+            title={e.detail || undefined}
+            onClick={() => ui.open({ kind: "item", panelId: panel.id, itemId: k.id })}
+          >
+            <span className="name">
+              {k.name}
+              {e.jira ? <span className="tag kpi-src">Jira</span> : null}
+            </span>
+            {waiting ? (
+              <span className="kpi-msg" role={e.state === "error" ? "alert" : undefined}>
+                {e.message}
+              </span>
+            ) : (
+              <span className="val">
+                <span className="big">{fmtNum(e.actual)}</span>
+                <span className="unit">{e.unit}</span>
+                <span className="trend">{e.trend}</span>
+              </span>
+            )}
+            <span className="tgt">
+              Target {k.dir === "down" ? "≤" : "≥"} {fmtNum(k.target)} {e.unit}
+            </span>
+            {e.state === "empty" ? <span className="kpi-msg">{e.message}</span> : null}
+            <Spark history={e.history} target={k.target} />
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -288,7 +302,77 @@ function ActionsBody({ panel, live }: BodyProps<ActionsPanel>) {
 
 /* ---------- Flow board ---------- */
 
-function KanbanBody({ panel }: BodyProps<KanbanPanel>) {
+function JiraCard({ card, tv }: { card: BoardCardView; tv: boolean }) {
+  const body = (
+    <>
+      {card.title}
+      <span className="cmeta">
+        {card.key && card.key !== card.title ? <span className="key">{card.key}</span> : null}
+        {card.assignee ? <span>{card.assignee}</span> : null}
+        {card.type ? <span className="tag">{card.type}</span> : null}
+        {card.pointsText ? <span>{card.pointsText}</span> : null}
+        {card.blocked ? (
+          <span className="blk" title={card.blockedReason || undefined}>
+            Blocked
+          </span>
+        ) : null}
+        {card.age ? (
+          <span className="age" title={`${card.age.slice(0, -1)} days in this stage`}>
+            {card.age}
+          </span>
+        ) : null}
+      </span>
+    </>
+  );
+  const cls = `card jira${card.blocked ? " blocked" : ""}`;
+  // In the editor a card opens the issue in Jira. A TV has nobody to click it.
+  return card.url && !tv ? (
+    <a className={cls} href={card.url} target="_blank" rel="noopener noreferrer" draggable={false}>
+      {body}
+    </a>
+  ) : (
+    <div className={cls}>{body}</div>
+  );
+}
+
+/** A flow board fed by a Jira board: same look as a manual one, but read-only. */
+function JiraBoardBody({ panel, live, tv }: BodyProps<KanbanPanel>) {
+  const view = boardView(panel, live);
+  if (!view) return null;
+  if (view.state !== "ok") {
+    return (
+      <p className={view.state === "error" ? "pbar-note is-error" : "empty"} style={{ margin: 0 }} role={view.state === "error" ? "alert" : undefined}>
+        {view.message}
+      </p>
+    );
+  }
+  return (
+    <>
+      <div className="board">
+        {view.columns.map((c, i) => (
+          <div key={`${i}:${c.name}`} className={`col${c.over ? " over" : ""}`}>
+            <div className="col-head">
+              <span>{c.name}</span>
+              <span className="wip">{c.countText}</span>
+            </div>
+            {c.cards.map((card) => (
+              <JiraCard key={card.key} card={card} tv={tv} />
+            ))}
+            {c.more > 0 ? <div className="col-more">+{c.more} more</div> : null}
+          </div>
+        ))}
+      </div>
+      {view.columns.length ? null : <p className="empty">This board has no columns to show.</p>}
+      {view.footer ? <p className="board-foot">{view.footer}</p> : null}
+    </>
+  );
+}
+
+function KanbanBody(props: BodyProps<KanbanPanel>) {
+  return props.panel.data.jira ? <JiraBoardBody {...props} /> : <ManualBoardBody {...props} />;
+}
+
+function ManualBoardBody({ panel }: BodyProps<KanbanPanel>) {
   const ui = useUi();
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropCol, setDropCol] = useState<string | null>(null);
