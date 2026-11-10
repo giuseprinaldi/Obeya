@@ -24,13 +24,30 @@ TV 2 (#tv-...)   ─┘            │  serves the React build and /api
 3. The sync thread reads the room, collects every distinct link, computes each one against Jira and writes the result to `progress_cache`. A full sync runs every `OBEYA_SYNC_SECONDS`; saving the room triggers a quick run for links that have no result yet.
 4. `GET /api/state` returns the room together with the cached results, keyed by the id of the bar that owns each link. Screens poll it.
 
-**What counts.** For a linked issue the server walks down the hierarchy: Parent Link (Advanced Roadmaps), Epic Link, and optionally sub-tasks; on Cloud, `parent`. Anything with children is replaced by its children, so an initiative is measured by the stories under its epics. Anything without children counts as itself, so an epic with no stories shows as one open item. A JQL bar measures exactly the issues the query matches.
+**What counts.** For a linked issue the server walks down the hierarchy: Parent Link (Advanced Roadmaps), Epic Link, and optionally sub-tasks; on Cloud, `parent`. Anything with children is replaced by its children, so an initiative is measured by the stories under its epics. Anything without children counts as itself, so an epic with no stories shows as one open item. A JQL bar measures exactly the issues the query matches, unless "Count the work under each match" is ticked: then each match is walked the same way as a linked issue, and work reached from two matches (an epic and one of its own stories, say) counts once. That is the way to measure a PI by story points when only the epics carry the PI field. The option is stored as `descend` on the link and is left out of the link's identity when it is off, so links saved before it existed keep their history.
 
 **Done.** By default, Jira's "Done" status category. A bar can instead name the statuses that count as done. Progress is by issue count or by story points.
 
 **Sprints and PIs.** Queries can use Jira's own `openSprints()`. For PIs, queries can use `{PI}`, `{NEXT_PI}`, `{PREV_PI}` and `{PI_FIELD}`; the server fills them in from the PI calendar and the PI field chosen in Jira settings. When the date passes into the next PI, every bar that uses `{PI}` follows without anyone editing it. Pace markers use the active sprint of the chosen board and the dates in the PI calendar.
 
 **Jira outages.** If Jira is unreachable or rejects the token, the sync stops and keeps the last good numbers; the error shows in Jira settings. A broken link (unknown key, bad JQL) shows its error on that bar only.
+
+## Trends and burn-up charts
+
+Every sync writes one snapshot per link per day (done and total) to `progress_history`. Two things are drawn from it:
+
+- **Bar trends.** A Jira-linked bar shows a small line of percent done over the last 30 days and the change in the done amount over the last 7 ("+4 in 7d"). While the history is shorter than a week it compares with the oldest day it has and says so ("+2 in 3d"). The column appears once any bar in the panel has an earlier day to compare with, and can be switched off in the panel settings. Bars get no replayed history: their trend builds up from the day they are first linked.
+- **Burn-up charts.** A burn-up panel is linked to one issue or query, like a bar, and covers the current PI, the active sprint or chosen dates. It draws scope and done for each day, a straight even-pace line from nothing at the start to the whole scope at the end, and a forecast. Its status (on pace, at risk, behind) uses the same rule and thresholds as a bar with a pace marker. The forecast extends the pace of the last 14 days (at least 3 are needed) and says either when the work would be finished or how much would be done by the end.
+
+**Days before the chart existed.** A new chart would be empty until snapshots pile up, so the first sync after it is added replays the past once: it reads the issues the link covers today together with their histories (`expand=changelog`), and works out done and total for the end of each day back to the start of the period (at most 180 days). This runs once per link, and again only if the chart is later given an earlier start; what was done is recorded under the `backfill` key in `kv`. A day that already has a real snapshot is never overwritten. If the replay fails (for example the query matches more than 2,000 issues), the chart still works from today onwards and the replay is tried again after 30 minutes.
+
+The replay is an approximation, and the panel settings say so:
+
+- it only knows the issues in scope today, so work that was moved out of the scope is not in the earlier days;
+- an issue counts towards the scope from the day it was created, not the day it was added to the epic, PI or sprint;
+- story points are taken as they are today.
+
+Days are cut at midnight in the server's own time zone, the same clock that decides which day a snapshot belongs to. For a query that uses `{PI}`, the chart starts again by itself when the PI rolls over, because the period and the query both follow the calendar.
 
 ## How Jira flow boards work
 
@@ -103,7 +120,7 @@ A TV opens `/#screen-N`. It shows whichever wall is at position N and follows it
 | PI calendar | There is a current PI and it is not about to run out. |
 | Boards and sprints | The chosen board can be read and has an active sprint. |
 | Status categories | Needed to tell when work started and finished. |
-| Issue histories | Searches return complete histories, which the look-back metrics need. |
+| Issue histories | Searches return complete histories, which the look-back metrics and the earlier days of burn-up charts need. |
 | Days in status on cards | Whether this Jira reports it. |
 
 The command exits with status 1 if any check failed, so it can be used in a deployment script. It reads from Jira and writes nothing.
@@ -114,7 +131,7 @@ All JSON, same origin. Errors are `{"error": "..."}` with a non-2xx status. Type
 
 | Method and path | Purpose |
 |---|---|
-| `GET /api/state` | Room, version, Jira results (`progress`, `auto`, `boards`, `metrics`), `periods`, `sync` status, and `access` (whether this browser may edit). Sends an ETag. |
+| `GET /api/state` | Room, version, Jira results (`progress`, `auto`, `boards`, `metrics`, `burnups`), `periods`, `sync` status, and `access` (whether this browser may edit). Bars carry the last 60 days of history, burn-up charts the last 180. Sends an ETag. |
 | `PUT /api/room` | Body `{room, baseVersion}`. `200 {version, updatedAt}`, or `409 {error: "conflict", version, room}` if someone saved first. `baseVersion` 0 creates the room. |
 | `GET /api/settings`, `PUT /api/settings` | PI field, story points field, board, summaries and assignee names on or off, the blocked rule, PI calendar. Saving triggers a full sync. |
 | `POST /api/sync` | Run a full sync now and wait for it. |
@@ -137,8 +154,8 @@ Anything else under `/` is served from `frontend/dist`, with `index.html` as the
 | `room_history` | The last 100 versions of the room, for recovery. |
 | `settings` | One row: Jira field choices and the PI calendar. No secrets. |
 | `progress_cache` | Latest result per distinct link. |
-| `progress_history` | One snapshot per link per day (180 days kept). |
-| `kv` | Small cached values; currently the active sprint. |
+| `progress_history` | One snapshot per link per day (180 days kept), plus the replayed days of burn-up charts. |
+| `kv` | Small cached values: the active sprint, the edit lock, and which burn-up links have had their earlier days replayed. |
 | `sync_run` | Outcome of each sync (last 500). |
 
 The schema is `backend/obeya/schema_sqlite.sql` (SQLite) and `backend/obeya/schema.sql` (Postgres). Both are idempotent and applied on every start.
@@ -183,15 +200,16 @@ Environment variables, or `backend/.env` (see `backend/.env.example`):
 
 ## Tested and not tested
 
-- **Tested:** 137 backend tests (`python -m unittest discover -s tests -t .` in `backend/`), covering the PI calendar, JQL variables, progress and flow maths on hand-built histories, the Jira client, hierarchy walk, boards and metrics over real HTTP against the fake Jira, and the API against a real SQLite database. Setting `OBEYA_TEST_DATABASE_URL` to a `postgresql://` URL runs the API tests a second time on Postgres (160 tests in total). The edit lock is covered there: forged, edited and expired cookies, the guess limit, and every endpoint refusing a locked-out browser.
-- **Frontend:** 105 unit tests on the status, pace, link-parsing, calendar, board, KPI, access and screen-address logic (`npm test` in `frontend/`). The built app was also run in Chrome against this server and the fake Jira: first-run seeding, linking a bar from a pasted Jira URL, Check link (good and bad keys), auto-fill bars, adding a Jira KPI, switching a flow board between Jira boards, the "Blocked means" and assignee settings taking effect, Jira settings, display mode at 1366x768 and 1920x1080, arrow keys and Escape, and the "changed on another device" conflict path. Also run there: the edit lock (set, change and remove the passcode, lock, unlock, a wrong passcode, too many wrong guesses, view-only mode, a session ending mid-edit, and the server-side reset command against the running server); screen addresses (a TV following a reorder within its 30-second refresh, rotation without the address changing, wrap-around, and a screen with no wall); and the connection check section.
+- **Tested:** 153 backend tests (`python -m unittest discover -s tests -t .` in `backend/`), covering the PI calendar, JQL variables, progress and flow maths on hand-built histories, the Jira client, hierarchy walk, boards and metrics over real HTTP against the fake Jira, and the API against a real SQLite database. Setting `OBEYA_TEST_DATABASE_URL` to a `postgresql://` URL runs the API tests a second time on Postgres (182 tests in total). The edit lock is covered there: forged, edited and expired cookies, the guess limit, and every endpoint refusing a locked-out browser. So is the burn-up replay: that it ends on the same numbers the link shows today, runs once per link, runs again only for an earlier start, never overwrites a real snapshot, and is not retried on every sync when it fails.
+- **Frontend:** 127 unit tests on the status, pace, link-parsing, calendar, board, KPI, access, screen-address, bar-trend and burn-up logic (`npm test` in `frontend/`). The burn-up chart and the trend column were run in Chrome against this server and the fake Jira: both example charts in the editor (light and dark) and in display mode at 1920x1080, the hover read-out, adding a chart and linking it to a query, Check link, changing the period to custom dates (and being stopped when they are missing), and the two-column bar layout with the trend column on a TV. The built app was also run in Chrome against this server and the fake Jira: first-run seeding, linking a bar from a pasted Jira URL, Check link (good and bad keys), auto-fill bars, adding a Jira KPI, switching a flow board between Jira boards, the "Blocked means" and assignee settings taking effect, Jira settings, display mode at 1366x768 and 1920x1080, arrow keys and Escape, and the "changed on another device" conflict path. Also run there: the edit lock (set, change and remove the passcode, lock, unlock, a wrong passcode, too many wrong guesses, view-only mode, a session ending mid-edit, and the server-side reset command against the running server); screen addresses (a TV following a reorder within its 30-second refresh, rotation without the address changing, wrap-around, and a screen with no wall); and the connection check section.
 - **Frontend, not tested:** Firefox and Safari (the bar layout uses CSS subgrid, `:has()` and container queries, so use a current browser on the TVs), the wall rotation timer over a long run, and the copy-to-clipboard button.
 - **Display mode has a density limit.** A wall is scaled to fit the screen, and text shrinks as a wall gets denser, down to a floor. Past that floor panels are cut off at the bottom rather than scrolled. The example Delivery wall (four panels, three KPIs, eight bars and a four-column Jira board at six cards per column) fits a 16:9 screen with a little shrinking; much more than that should be split across two walls, or the board given fewer cards per column.
 - **Not tested against real Jira.** The fake follows Data Center's documented shapes, but these need checking on the VM:
   - that the service token can read the projects and boards involved;
   - that this Jira version reports `statuscategorychangedate` (it drives the age shown on cards; without it cards simply show no age);
   - that the flag field is called "Flagged", which is how the server finds it;
-  - that searches with `expand=changelog` return complete histories for long-lived issues (the look-back metrics depend on it);
+  - that searches with `expand=changelog` return complete histories for long-lived issues (the look-back metrics and the replayed days of burn-up charts depend on it);
+  - how long the burn-up replay takes on a real scope: it is one search with histories per chart for a query, and one per 40 issues for an issue link, run once;
   - how this instance returns the Parent Link field (the code handles a key, an id or an object, and falls back to one query per parent if it cannot read it);
   - that the PI field accepts `cf[NNNNN] = "name"` (a text field would need `~` in the query instead of `=`).
 - **Jira Cloud is untested.** The client switches to Cloud's search endpoint and `parent` hierarchy when `serverInfo` reports Cloud, but nothing has exercised it.

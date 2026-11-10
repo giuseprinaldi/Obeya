@@ -234,6 +234,16 @@ class Database:
                 conn.execute("DELETE FROM progress_history WHERE day < ?",
                              (self._day(today - timedelta(days=HISTORY_DAYS)),))
 
+    def fill_history(self, hid: str, rows: list[tuple[date, float, float]]) -> None:
+        """Add (day, done, total) rows for days that have no snapshot yet. A day
+        that already has one keeps it: what was seen on the day beats a replay."""
+        with self.connect() as conn:
+            for day, done, total in rows:
+                conn.execute(
+                    "INSERT INTO progress_history (sid, day, done, total) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT (sid, day) DO NOTHING",
+                    (hid, self._day(day), float(done), float(total)))
+
     def history(self, hids: list[str], days: int = 60) -> dict[str, list[dict]]:
         out: dict[str, list[dict]] = {}
         since = self._day(date.today() - timedelta(days=days))

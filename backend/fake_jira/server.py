@@ -107,6 +107,8 @@ def make_fake_server(host: str = "127.0.0.1", port: int = 8790, token: str = DEF
             expand = args.get("expand") or ""
             if isinstance(expand, list):
                 expand = ",".join(expand)
+            if "changelog" in expand:
+                server.history_searches += 1
             page = []
             for issue in matches[start:start + size]:
                 item = dataset.to_json(issue, self._base(), fields, changelog=changelog and "changelog" in expand)
@@ -129,6 +131,7 @@ def make_fake_server(host: str = "127.0.0.1", port: int = 8790, token: str = DEF
     server.daemon_threads = True
     server.dataset = dataset  # type: ignore[attr-defined]
     server.requests = 0  # type: ignore[attr-defined]
+    server.history_searches = 0  # type: ignore[attr-defined]  # searches that asked for issue histories
     return server
 
 

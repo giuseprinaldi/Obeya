@@ -5,10 +5,34 @@ import { defaultDisplay } from "../../logic/progress";
 import { PANEL_TYPES, SPANS, newPanel } from "../../logic/seed";
 import { clamp, uid } from "../../logic/util";
 import { store } from "../../store";
-import type { AutoSource, BarDisplay, BoardResult, BoardSource, JiraBoard, Panel, PanelType, ProgressSort, Span, Wall } from "../../types";
+import { defaultBurnPeriod } from "../../logic/burnup";
+import type { AutoSource, BarDisplay, BoardResult, BoardSource, BurnPeriod, JiraBoard, JiraSource, Panel, PanelType, ProgressSort, Span, Wall } from "../../types";
 import { findPanel, wallById } from "../../ui";
 import { CheckField, Dialog, Segmented, SelectField, TextArea, TextField } from "../Dialog";
-import { BoardPicker, CheckLink, DisplayFields, JqlInput, OptionsFields, displayError, optionsDraft, optionsOf, useBoards, type OptionsDraft } from "./JiraFields";
+import {
+  BoardPicker,
+  CheckLink,
+  DisplayFields,
+  JqlInput,
+  LinkFields,
+  OptionsFields,
+  PeriodFields,
+  datesError,
+  displayError,
+  linkDraft,
+  linkSource,
+  optionsDraft,
+  optionsOf,
+  useBoards,
+  type LinkDraft,
+  type OptionsDraft,
+} from "./JiraFields";
+
+type LinkKind = JiraSource["kind"];
+const LINK_KINDS: readonly (readonly [LinkKind, string])[] = [
+  ["jql", "Jira query"],
+  ["issue", "Jira issue"],
+];
 
 const SPAN_OPTIONS = SPANS.map(([n, l]) => [String(n), l] as const);
 const toSpan = (s: string): Span => (s === "2" ? 2 : s === "3" ? 3 : 1);
@@ -209,6 +233,12 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
   const [showKeys, setShowKeys] = useState(pd?.showKeys ?? true);
   const [auto, setAuto] = useState<AutoDraft>(() => ({ on: !!pd?.auto, jql: pd?.auto?.jql ?? "", limit: String(pd?.auto?.limit ?? 12), ...optionsDraft(pd?.auto) }));
   const [autoDisplay, setAutoDisplay] = useState<BarDisplay>(() => pd?.autoDisplay ?? defaultDisplay());
+  const [showTrend, setShowTrend] = useState(pd?.showTrend ?? true);
+  const bd = panel.type === "burnup" ? panel.data : null;
+  const [burnKind, setBurnKind] = useState<LinkKind>(bd?.source?.kind ?? "jql");
+  const [burnLink, setBurnLink] = useState<LinkDraft>(() => linkDraft(bd?.source));
+  const [burnPeriod, setBurnPeriod] = useState<BurnPeriod>(() => bd?.period ?? defaultBurnPeriod());
+  const burnDraft: LinkDraft = { ...burnLink, kind: burnKind };
 
   const save = (): string | void => {
     const name = title.trim();
@@ -234,6 +264,18 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
         if (problem) return problem;
       }
     }
+    let burnSource: JiraSource | null = null;
+    if (panel.type === "burnup") {
+      // Left empty, the chart is saved unlinked and says so on the wall.
+      const empty = burnKind === "issue" ? !burnLink.keyInput.trim() : !burnLink.jql.trim();
+      if (!empty) {
+        const s = linkSource(burnDraft);
+        if (typeof s === "string") return s;
+        burnSource = s;
+      }
+      const problem = datesError(burnPeriod, "the chart");
+      if (problem) return problem;
+    }
     store.commit((room) => {
       const p = findPanel(room, panel.id)?.panel;
       if (!p) return;
@@ -253,9 +295,11 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
       if (p.type === "progress") {
         p.data.sort = sort;
         p.data.showKeys = showKeys;
+        p.data.showTrend = showTrend;
         p.data.auto = autoSource;
         p.data.autoDisplay = autoDisplay;
       }
+      if (p.type === "burnup") p.data = { source: burnSource, period: burnPeriod };
     });
   };
 
@@ -266,7 +310,13 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
     });
 
   return (
-    <Dialog title="Edit panel" onClose={onClose} onSubmit={save} wide={panel.type === "progress" || panel.type === "kanban"} danger={{ label: "Delete panel", onConfirm: removePanel }}>
+    <Dialog
+      title="Edit panel"
+      onClose={onClose}
+      onSubmit={save}
+      wide={panel.type === "progress" || panel.type === "kanban" || panel.type === "burnup"}
+      danger={{ label: "Delete panel", onConfirm: removePanel }}
+    >
       <div className="two">
         <TextField label="Panel title" value={title} onChange={setTitle} />
         <SelectField label="Width on the wall" value={span} onChange={setSpan} options={SPAN_OPTIONS} />
@@ -296,6 +346,12 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
             <SelectField label="Order of the bars" value={sort} onChange={setSort} options={SORTS} />
             <CheckField label="Show the Jira key next to each bar" checked={showKeys} onChange={setShowKeys} />
           </div>
+          <CheckField
+            label="Show how each bar has moved"
+            checked={showTrend}
+            onChange={setShowTrend}
+            hint="A small line of the last 30 days and the change over the last week, for bars linked to Jira. It builds up a day at a time from when a bar is first linked."
+          />
           <div className="dlg-section">
             <h4>Auto-fill from Jira</h4>
             <CheckField
@@ -319,6 +375,26 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
                 <DisplayFields value={autoDisplay} onChange={setAutoDisplay} />
               </>
             ) : null}
+          </div>
+        </>
+      ) : null}
+      {panel.type === "burnup" ? (
+        <>
+          <Segmented legend="The chart follows" value={burnKind} onChange={setBurnKind} options={LINK_KINDS} />
+          <LinkFields value={burnDraft} onChange={setBurnLink} />
+          <CheckLink
+            build={() => {
+              const s = linkSource(burnDraft);
+              return typeof s === "string" ? s : { source: s };
+            }}
+          />
+          <div className="dlg-section">
+            <h4>Period</h4>
+            <PeriodFields value={burnPeriod} onChange={setBurnPeriod} />
+            <span className="hint">
+              The days before the chart was linked are worked out from Jira's history of the issues in scope today: when each was created and when it was finished. From then
+              on the chart records what it sees each day.
+            </span>
           </div>
         </>
       ) : null}

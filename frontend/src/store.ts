@@ -21,6 +21,7 @@ export interface StoreState {
   auto: Record<string, AutoResult>;
   boards: Record<string, BoardResult>;
   metrics: Record<string, MetricResult>;
+  burnups: Record<string, ProgressResult>;
   periods: Periods;
   sync: SyncInfo;
   /** Whether this browser may edit. View-only browsers never save, seed or open editors. */
@@ -42,6 +43,7 @@ let state: StoreState = {
   auto: {},
   boards: {},
   metrics: {},
+  burnups: {},
   periods: { today: todayISO(), pi: null, nextPi: null, sprint: null },
   sync: { jiraConfigured: false, running: false, lastRunAt: null, lastOk: null, lastError: null, intervalSeconds: 300 },
   access: OPEN_ACCESS,
@@ -85,9 +87,10 @@ function applyServer(s: ServerState, seqAtStart: number, force: boolean): void {
     offlineSince: null,
     progress: s.progress ?? {},
     auto: s.auto ?? {},
-    // An older server sends neither of these.
+    // An older server sends none of these.
     boards: s.boards ?? {},
     metrics: s.metrics ?? {},
+    burnups: s.burnups ?? {},
     periods: s.periods ?? state.periods,
     sync: s.sync ?? state.sync,
     // An older server sends no access: the room is open.
@@ -312,5 +315,5 @@ export function useStore(): StoreState {
 
 /** The live Jira data in the shape the status and progress rules take. */
 export function liveOf(s: StoreState): LiveData {
-  return { progress: s.progress, auto: s.auto, boards: s.boards, metrics: s.metrics, periods: s.periods, jiraConfigured: s.sync.jiraConfigured };
+  return { progress: s.progress, auto: s.auto, boards: s.boards, metrics: s.metrics, burnups: s.burnups, periods: s.periods, jiraConfigured: s.sync.jiraConfigured };
 }

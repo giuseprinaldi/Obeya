@@ -42,12 +42,15 @@ export function calendarError(pis: Period[]): string | null {
 
 const usesPiVar = (jql: string | undefined): boolean => !!jql && /\{(PI|NEXT_PI|PREV_PI)\}/.test(jql);
 
-/** True when any bar in the room depends on the PI calendar. */
+/** True when any bar or burn-up chart in the room depends on the PI calendar. */
 export function roomUsesPi(room: Room): boolean {
   for (const w of room.walls) {
     for (const p of w.panels) {
       if (p.type === "portfolio") {
         if (p.data.items.some((x) => x.source?.kind === "jql" && usesPiVar(x.source.jql))) return true;
+      }
+      if (p.type === "burnup" && p.data.source) {
+        if (p.data.period.kind === "pi" || (p.data.source.kind === "jql" && usesPiVar(p.data.source.jql))) return true;
       }
       if (p.type === "progress") {
         if (p.data.auto && (usesPiVar(p.data.auto.jql) || p.data.autoDisplay.pace.kind === "pi")) return true;

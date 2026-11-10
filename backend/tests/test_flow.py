@@ -173,6 +173,34 @@ class Statistics(unittest.TestCase):
         self.assertIsNone(flow.percent(0, 0))
 
 
+class Burnup(unittest.TestCase):
+    ITEMS = [
+        (tl("A", 0, [(2, "To Do", "In Progress"), (4, "In Progress", "Done")]), 3.0),
+        (tl("B", 1, [(3, "To Do", "Done"), (5, "Done", "In Progress"), (8, "In Progress", "Done")]), 5.0),
+        (tl("C", 6), 2.0),                       # created late, never started
+    ]
+
+    def test_scope_grows_as_issues_are_created_and_done_follows_history(self):
+        moments = [day(n + 0.5) for n in range(-1, 9)]   # half a day before A exists, then daily
+        self.assertEqual(flow.burnup(self.ITEMS, moments), [
+            (0, 0),      # nothing exists yet
+            (0, 3),      # A
+            (0, 8),      # A and B
+            (0, 8),
+            (5, 8),      # B done on day 3
+            (8, 8),      # A done on day 4
+            (3, 8),      # B reopened on day 5: no longer done
+            (3, 10),     # C created
+            (3, 10),
+            (8, 10),     # B finished again
+        ])
+
+    def test_custom_done_statuses_and_nothing_to_replay(self):
+        self.assertEqual(flow.burnup(self.ITEMS, [day(2.5), day(4.5)], ["In Progress"]), [(3, 8), (0, 8)])
+        self.assertEqual(flow.burnup([], [day(1)]), [(0, 0)])
+        self.assertEqual(flow.burnup(self.ITEMS, []), [])
+
+
 # ---------- against the fake Jira ----------
 
 TODAY = date.today()   # the engine measures ages and windows from the real clock

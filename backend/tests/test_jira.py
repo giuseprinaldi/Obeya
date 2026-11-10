@@ -1,13 +1,13 @@
 """The Jira client and the progress engine, run against the fake Jira over real HTTP."""
 import threading
 import unittest
-from datetime import date
+from datetime import date, timedelta
 
 from fake_jira.data import PI_FIELD, STORY_POINTS, Dataset
 from fake_jira.jql import JqlError, search
 from fake_jira.server import DEFAULT_TOKEN, make_fake_server, suggested_settings
 from obeya.jira_client import JiraClient, JiraError, JiraUnavailable
-from obeya.sources import Engine, normalize_auto, normalize_source
+from obeya.sources import Engine, SourceError, normalize_auto, normalize_source
 
 TODAY = date(2026, 11, 10)
 WORK = ("Story", "Bug")   # the issue types that sit under epics in the sample data
@@ -155,6 +155,33 @@ class EngineTests(unittest.TestCase):
         stories = [i for i in self.ds.issues if active in i["sprints"]]
         self.assertEqual((r["issues"], r["total"]), (len(stories), sum(s["points"] or 0 for s in stories)))
 
+    def test_query_can_measure_the_work_under_each_match(self):
+        jql = 'issuetype = Epic AND {PI_FIELD} = "{PI}"'
+        epics = [i["key"] for i in self.ds.issues if i["type"] == "Epic" and i["pi"] == self.ds.pis[1]["name"]]
+        flat = self.engine().compute(normalize_source({"kind": "jql", "jql": jql, "measure": "points"}))
+        self.assertEqual((flat["issues"], flat["total"]), (7, 0))        # seven epics, which carry no estimates
+        deep = self.engine().compute(normalize_source({"kind": "jql", "jql": jql, "measure": "points", "descend": True}))
+        self.assertTrue(deep["ok"], deep)
+        self.assertEqual((deep["total"], deep["done"], deep["issues"]), self.expected(epics, "points"))
+        self.assertGreater(deep["done"], 0)
+        self.assertNotIn("key", deep)
+        # The epic with no stories still counts as one open item, as it does under an issue link.
+        by_count = self.engine().compute(normalize_source({"kind": "jql", "jql": jql, "descend": True}))
+        self.assertEqual((by_count["total"], by_count["done"], by_count["issues"]), self.expected(epics))
+
+    def test_work_reached_from_two_matches_counts_once(self):
+        def under(jql):
+            r = self.engine().compute(normalize_source({"kind": "jql", "jql": jql, "descend": True}))
+            self.assertTrue(r["ok"], r)
+            return (r["total"], r["done"], r["issues"])
+        # An epic together with its own stories, and an initiative together with one of its epics.
+        self.assertEqual(under('key = PLAT-2 OR "Epic Link" = PLAT-2'), self.expected(["PLAT-2"]))
+        whole = self.engine().compute(normalize_source({"kind": "issue", "key": "PLAT-1"}))
+        self.assertEqual(under("key in (PLAT-1, PLAT-2)"), (whole["total"], whole["done"], whole["issues"]))
+        # Matches with nothing under them count as themselves, so the option never loses work.
+        flat = self.engine().compute(normalize_source({"kind": "jql", "jql": "sprint in openSprints()"}))
+        self.assertEqual(under("sprint in openSprints()"), (flat["total"], flat["done"], flat["issues"]))
+
     def test_bad_jql_is_reported_on_the_bar(self):
         r = self.engine().compute(normalize_source({"kind": "jql", "jql": "nosuchfield = 1"}))
         self.assertFalse(r["ok"])
@@ -192,6 +219,48 @@ class EngineTests(unittest.TestCase):
         self.engine().compute(normalize_auto({"jql": "issuetype = Epic", "limit": 50}))
         # field list is cached; 1 search for the epics, then a few per level, not a few per epic.
         self.assertLess(self.server.requests - before, 12)
+
+    # ---- the days before a link existed, replayed for burn-up charts ----
+
+    def test_daily_history_ends_where_the_link_stands_today(self):
+        review_epic = next(i["epic"] for i in self.ds.issues if i["status"] == "In Review" and i["type"] in WORK)
+        for raw in ({"kind": "issue", "key": "PLAT-1"},
+                    {"kind": "issue", "key": "DATA-1", "measure": "points"},
+                    {"kind": "issue", "key": "PLAT-2", "includeSubtasks": True},
+                    {"kind": "issue", "key": review_epic, "doneStatuses": ["Done", "In Review"]},
+                    {"kind": "jql", "jql": "project = PLAT AND issuetype in (Story, Bug)", "measure": "points"},
+                    {"kind": "jql", "jql": 'issuetype = Epic AND {PI_FIELD} = "{PI}"'},
+                    {"kind": "jql", "jql": 'issuetype = Epic AND {PI_FIELD} = "{PI}"', "descend": True, "measure": "points"}):
+            spec = normalize_source(raw)
+            now = self.engine().compute(spec)
+            rows = self.engine().daily_history(spec, TODAY - timedelta(days=40), TODAY)
+            self.assertEqual([r[0] for r in rows], [TODAY - timedelta(days=n) for n in range(40, -1, -1)], raw)
+            # Replayed to the end of today, the history must agree with what the bar shows today.
+            self.assertEqual(rows[-1][1:], (now["done"], now["total"]), raw)
+            totals = [r[2] for r in rows]
+            self.assertEqual(totals, sorted(totals), raw)                  # scope only grows as issues are created
+            self.assertTrue(all(done <= total for _, done, total in rows), raw)
+
+    def test_daily_history_shows_the_work_being_finished(self):
+        spec = normalize_source({"kind": "issue", "key": "PLAT-1"})
+        rows = self.engine().daily_history(spec, TODAY - timedelta(days=40), TODAY)
+        done = [r[1] for r in rows]
+        self.assertLess(done[0], done[-1])
+        self.assertGreater(len(set(done)), 5)        # it climbs over many days, not in one step
+        finished = sorted(i["resolved"].date() for i in self.ds.issues
+                          if i["type"] in WORK and i["status"] == "Done" and i["epic"]
+                          and self.ds.by_key(i["epic"])["parent_link"] == "PLAT-1")
+        # Nothing counts as done before the day the first story was finished.
+        first = next(day for day, d, _ in rows if d > 0)
+        self.assertLessEqual(abs((first - max(finished[0], rows[0][0])).days), 1)   # a day either way for time zones
+
+    def test_daily_history_of_a_broken_link_raises(self):
+        with self.assertRaisesRegex(SourceError, "NOPE-1 was not found"):
+            self.engine().daily_history(normalize_source({"kind": "issue", "key": "NOPE-1"}), TODAY, TODAY)
+        with self.assertRaises(JiraError):
+            self.engine().daily_history(normalize_source({"kind": "jql", "jql": "nosuchfield = 1"}), TODAY, TODAY)
+        self.assertEqual(self.engine().daily_history(normalize_source({"kind": "issue", "key": "PLAT-1"}),
+                                                     TODAY, TODAY - timedelta(days=1)), [])
 
 
 class OpaqueParentLink(unittest.TestCase):

@@ -12,13 +12,14 @@ import urllib.error
 import urllib.request
 import uuid
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 
 from fake_jira.server import DEFAULT_TOKEN, make_fake_server, suggested_settings
 from obeya.config import load_config
 from obeya.db import Database
 from obeya.server import App, make_server
-from obeya.sync import Syncer
+from obeya.sources import Engine, SourceError
+from obeya.sync import Syncer, collect_links
 
 
 def call(base, method, path, body=None, headers=None):
@@ -102,7 +103,7 @@ class RoomApi(ApiCase):
         s = self.state()
         self.assertIsNone(s["room"])
         self.assertEqual((s["version"], s["updatedAt"], s["progress"], s["auto"]), (0, None, {}, {}))
-        self.assertEqual((s["boards"], s["metrics"]), ({}, {}))
+        self.assertEqual((s["boards"], s["metrics"], s["burnups"]), ({}, {}, {}))
         self.assertEqual(s["periods"]["today"], date.today().isoformat())
         self.assertEqual((s["periods"]["pi"], s["periods"]["sprint"]), (None, None))
         self.assertTrue(s["sync"]["jiraConfigured"])
@@ -390,6 +391,125 @@ class FlowApi(ApiCase):
         self.assertEqual(call(self.base, "POST", "/api/jira/preview", {"metric": {"kind": "wip"}})[0], 400)
 
 
+class BurnupApi(ApiCase):
+    TODAY = date.today()
+
+    def configure(self):
+        call(self.base, "PUT", "/api/settings", suggested_settings(self.fake.dataset))
+
+    def burnup(self, source, period, panel_id="u1"):
+        return {"id": panel_id, "type": "burnup", "title": "Burn-up", "span": 2, "data": {"source": source, "period": period}}
+
+    def dates(self, days_back, days_ahead=20):
+        return {"kind": "dates", "start": (self.TODAY - timedelta(days=days_back)).isoformat(),
+                "end": (self.TODAY + timedelta(days=days_ahead)).isoformat()}
+
+    def setUp(self):
+        super().setUp()
+        self.history_base = self.fake.history_searches
+
+    def searches_with_history(self):
+        """Searches that asked Jira for issue histories since this test began: the heavy call."""
+        return self.fake.history_searches - self.history_base
+
+    def test_a_new_chart_gets_the_days_before_it_existed(self):
+        self.configure()
+        link = {"kind": "issue", "key": "PLAT-1", "measure": "points"}
+        self.save(room(self.burnup(link, self.dates(30))), 0)
+        self.assertEqual(self.state()["burnups"], {})                    # nothing until a sync has run
+        self.assertEqual(self.syncer.run(full=False)["sources"], 1)      # the quick run after an edit is enough
+        chart = self.state()["burnups"]["u1"]
+        self.assertEqual((chart["ok"], chart["key"], chart["unit"]), (True, "PLAT-1", "points"))
+        days = [h["d"] for h in chart["history"]]
+        self.assertEqual(days, [(self.TODAY - timedelta(days=n)).isoformat() for n in range(30, -1, -1)])
+        # Today's point is the real snapshot; the days before it are replayed from history.
+        self.assertEqual(chart["history"][-1], {"d": self.TODAY.isoformat(), "done": chart["done"], "total": chart["total"]})
+        self.assertLess(chart["history"][0]["done"], chart["done"])
+        self.assertTrue(all(h["done"] <= h["total"] for h in chart["history"]))
+
+    def test_the_replay_runs_once_and_again_only_for_an_earlier_start(self):
+        self.configure()
+        link = {"kind": "jql", "jql": "project = DATA AND issuetype in (Story, Bug)"}
+        self.save(room(self.burnup(link, self.dates(10))), 0)
+        self.syncer.run(full=True)
+        after_first = self.searches_with_history()
+        self.assertEqual(after_first, 1)
+        self.assertEqual(len(self.state()["burnups"]["u1"]["history"]), 11)
+        self.syncer.run(full=True)
+        self.syncer.run(full=False)
+        self.assertEqual(self.searches_with_history(), after_first)      # not replayed on every sync
+        # A later start needs nothing new; an earlier one is replayed, without a new link to compute.
+        self.save(room(self.burnup(link, self.dates(5))), 1)
+        self.assertEqual(self.syncer.run(full=False)["sources"], 0)
+        self.assertEqual(self.searches_with_history(), after_first)
+        self.save(room(self.burnup(link, self.dates(25))), 2)
+        self.assertEqual(self.syncer.run(full=False)["sources"], 0)
+        self.assertEqual(self.searches_with_history(), after_first + 1)
+        self.assertEqual(len(self.state()["burnups"]["u1"]["history"]), 26)
+
+    def test_real_snapshots_are_never_overwritten(self):
+        self.configure()
+        link = {"kind": "issue", "key": "DATA-1"}
+        self.save(room(self.burnup(link, self.dates(6))), 0)
+        self.syncer._compute(collect_links(self.db.get_room()["doc"]).specs, self.db.get_settings(), True, False)
+        sid = collect_links(self.db.get_room()["doc"]).burnups["u1"]
+        seen = self.TODAY - timedelta(days=3)
+        self.db.store_results({}, [(sid, 1, 999)], seen)               # what a sync three days ago saw
+        self.syncer.run(full=True)
+        history = {h["d"]: h for h in self.state()["burnups"]["u1"]["history"]}
+        self.assertEqual(len(history), 7)
+        self.assertEqual((history[seen.isoformat()]["done"], history[seen.isoformat()]["total"]), (1, 999))
+        self.assertNotEqual(history[(seen - timedelta(days=1)).isoformat()]["total"], 999)
+
+    def test_pi_and_sprint_charts_follow_the_calendar_and_share_a_link_with_a_bar(self):
+        self.configure()
+        link = {"kind": "issue", "key": "PLAT-1"}
+        self.save(room(self.burnup(link, {"kind": "pi"}, "u1"), self.burnup(link, {"kind": "sprint"}, "u2"),
+                       progress_panel([{"id": "b1", "source": link}])), 0)
+        summary = self.syncer.run(full=True)
+        self.assertEqual((summary["ok"], summary["sources"]), (True, 1))      # one link, fetched once
+        s = self.state()
+        pi_start = date.fromisoformat(s["periods"]["pi"]["start"])
+        first = date.fromisoformat(s["burnups"]["u1"]["history"][0]["d"])
+        self.assertEqual(first, max(pi_start, self.TODAY - timedelta(days=179)))   # the earlier of the two starts wins
+        self.assertEqual(s["burnups"]["u2"]["history"], s["burnups"]["u1"]["history"])
+        # The bar on the same link gets the trend too, though only the last 60 days of it.
+        self.assertGreater(len(s["progress"]["b1"]["history"]), 1)
+        self.assertLessEqual(len(s["progress"]["b1"]["history"]), 61)
+
+    def test_a_chart_without_a_period_or_with_a_broken_link_is_left_alone(self):
+        self.configure()
+        self.save(room(self.burnup({"kind": "issue", "key": "PLAT-1"}, {"kind": "dates", "start": "", "end": ""}, "u1"),
+                       self.burnup({"kind": "issue", "key": "NOPE-1"}, self.dates(10), "u2"),
+                       self.burnup(None, self.dates(10), "u3")), 0)
+        self.assertTrue(self.syncer.run(full=True)["ok"])
+        s = self.state()
+        self.assertEqual(sorted(s["burnups"]), ["u1", "u2"])
+        self.assertEqual(len(s["burnups"]["u1"]["history"]), 1)          # today's snapshot only
+        self.assertFalse(s["burnups"]["u2"]["ok"])
+        self.assertEqual(self.searches_with_history(), 0)
+
+    def test_a_replay_that_fails_is_not_retried_on_every_sync(self):
+        self.configure()
+        link = {"kind": "jql", "jql": "project = PLAT AND issuetype = Story"}
+        self.save(room(self.burnup(link, self.dates(10))), 0)
+        original = Engine.daily_history
+        calls = []
+
+        def failing(engine, spec, first, last):
+            calls.append(first)
+            raise SourceError("This query matches more than 2000 issues. Narrow it down.")
+
+        Engine.daily_history = failing
+        try:
+            self.assertTrue(self.syncer.run(full=True)["ok"])            # the bar itself still syncs
+            self.syncer.run(full=True)
+        finally:
+            Engine.daily_history = original
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(self.state()["burnups"]["u1"]["history"]), 1)
+
+
 class WithoutJira(ApiCase):
     jira = False
 
@@ -407,7 +527,7 @@ class WithoutJira(ApiCase):
 
 
 if os.environ.get("OBEYA_TEST_DATABASE_URL"):
-    for _case in (RoomApi, SettingsApi, JiraApi, FlowApi, WithoutJira):
+    for _case in (RoomApi, SettingsApi, JiraApi, FlowApi, BurnupApi, WithoutJira):
         globals()[_case.__name__ + "Postgres"] = type(_case.__name__ + "Postgres", (_case,), {"postgres": True})
 
 

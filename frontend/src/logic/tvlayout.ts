@@ -42,6 +42,9 @@ function need(p: Panel, live: LiveData): number {
       if (p.span === 3) return FRAME + (n > TV_TWO_COLUMN_BARS ? Math.ceil(n / 2) : n) * 56;
       return FRAME + n * (p.span === 2 ? 56 : 78);
     }
+    case "burnup":
+      // The numbers and legend above a plot that is worth at least a third of a screen's height.
+      return FRAME + 300;
     case "kanban": {
       const board = boardView(p, live);
       // A Jira board has a line under it; its cards measure about 60px with their gap.

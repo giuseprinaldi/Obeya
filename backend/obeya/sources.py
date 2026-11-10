@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 
 from . import flow
@@ -63,7 +63,14 @@ def normalize_source(raw: Any) -> Optional[dict]:
         return {"kind": "issue", "key": key, **_options(raw)} if key else None
     if raw.get("kind") == "jql":
         jql = str(raw.get("jql") or "").strip()
-        return {"kind": "jql", "jql": jql[:4000], **_options(raw)} if jql else None
+        if not jql:
+            return None
+        spec = {"kind": "jql", "jql": jql[:4000], **_options(raw)}
+        # Only present when switched on, so links saved before the option existed keep
+        # their id, and with it their history.
+        if raw.get("descend") is True:
+            spec["descend"] = True
+        return spec
     return None
 
 
@@ -225,8 +232,52 @@ class Engine:
 
     # ---- kinds ----
 
-    def _issue(self, spec: dict) -> dict:
-        key = spec["key"]
+    def daily_history(self, spec: dict, first: date, last: date) -> list[tuple[date, float, float]]:
+        """(day, done, total) for an issue or query link at the end of each day from
+        first to last, replayed from the histories of the issues it covers today.
+
+        Used once per burn-up chart, to fill in the days before the link existed.
+        Raises SourceError or JiraError when the link cannot be read.
+        """
+        if last < first:
+            return []
+        fields = ["status", "issuetype", "created"] + ([self.points_field] if self.points_field else [])
+        if spec["kind"] == "jql" and not spec.get("descend"):
+            jql = resolve_jql(spec["jql"], self.pi_field, self.pis, self.today)
+            raw, truncated = self.client.search(jql, fields, limit=JQL_LIMIT, changelog=True)
+            if truncated:
+                raise SourceError(f"This query matches more than {JQL_LIMIT} issues. Narrow it down.")
+            if not spec["includeSubtasks"]:
+                raw = [r for r in raw if not ((r.get("fields") or {}).get("issuetype") or {}).get("subtask")]
+        elif spec["kind"] in ("issue", "jql"):
+            # The work sits below what the link names, so find it first, then read its histories.
+            if spec["kind"] == "issue":
+                root = self._root(spec["key"])
+                items = work_items(root, self._descend([root], spec["includeSubtasks"]))
+            else:
+                items = self._jql_items(spec)
+            keys = [i["key"] for i in items]
+            raw = []
+            for i in range(0, len(keys), CHUNK):
+                chunk = keys[i:i + CHUNK]
+                found, _ = self.client.search(f"key in ({', '.join(chunk)})", fields, limit=len(chunk), changelog=True)
+                raw.extend(found)
+        else:
+            raise SourceError("Only issue and query links have a daily history.")
+        categories = self.client.status_categories()
+        by_points = spec["measure"] == "points"
+        items = []
+        for r in raw:
+            points = issue_view(r, self.points_field)["points"]
+            items.append((flow.timeline(r, categories), float(points or 0) if by_points else 1.0))
+        days = [first + timedelta(days=n) for n in range((last - first).days + 1)]
+        # The end of a day is midnight in the server's own time zone, the same clock
+        # that decides which day a snapshot belongs to.
+        moments = [datetime.combine(day + timedelta(days=1), time.min).astimezone() for day in days]
+        return [(day, done, total)
+                for day, (done, total) in zip(days, flow.burnup(items, moments, spec["doneStatuses"]))]
+
+    def _root(self, key: str) -> dict:
         try:
             raw, _ = self.client.search(f"key = {key}", self._fields, limit=1)
         except JiraUnavailable:
@@ -235,11 +286,21 @@ class Engine:
             raw = []
         if not raw:
             raise SourceError(f"{key} was not found in Jira, or the Jira account cannot see it.")
-        root = issue_view(raw[0], self.points_field)
+        return issue_view(raw[0], self.points_field)
+
+    def _issue(self, spec: dict) -> dict:
+        root = self._root(spec["key"])
         children = self._descend([root], spec["includeSubtasks"])
         return self._bar(root, children, spec)
 
     def _jql(self, spec: dict) -> dict:
+        items = self._jql_items(spec)
+        return {"ok": True, **tally(items, spec["measure"], spec["doneStatuses"]), "history": [], "fetchedAt": _now()}
+
+    def _jql_items(self, spec: dict) -> list[dict]:
+        """The issues a query link measures: its matches, or with "descend" the work
+        under each match, found the same way as for an issue link. An issue reached
+        from two matches (an epic and one of its own stories, say) counts once."""
         jql = resolve_jql(spec["jql"], self.pi_field, self.pis, self.today)
         raw, truncated = self.client.search(jql, self._fields, limit=JQL_LIMIT)
         if truncated:
@@ -247,7 +308,17 @@ class Engine:
         items = [issue_view(r, self.points_field) for r in raw]
         if not spec["includeSubtasks"]:
             items = [i for i in items if not i["subtask"]]
-        return {"ok": True, **tally(items, spec["measure"], spec["doneStatuses"]), "history": [], "fetchedAt": _now()}
+        if not spec.get("descend"):
+            return items
+        children = self._descend(items, spec["includeSubtasks"])
+        out: list[dict] = []
+        seen: set[str] = set()
+        for root in items:
+            for item in work_items(root, children):
+                if item["key"] not in seen:
+                    seen.add(item["key"])
+                    out.append(item)
+        return out
 
     def _auto(self, spec: dict) -> dict:
         jql = resolve_jql(spec["jql"], self.pi_field, self.pis, self.today)

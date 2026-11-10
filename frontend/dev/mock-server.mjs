@@ -7,6 +7,7 @@
 // State lives in memory. Jira answers are invented from the issue key.
 // Invented on purpose, so every state can be seen: board 1 has a blocked card, a column over its WIP limit and a
 // column with "+N more"; a cycle_time KPI has nothing to measure; an unplanned KPI fails; board 404 fails.
+// Bars and burn-up charts come with an invented history; a key ending in -404 fails for either.
 import { createServer } from "node:http";
 
 const args = process.argv.slice(2);
@@ -45,6 +46,19 @@ function fake(key, measure, title) {
     unit: measure === "points" ? "points" : "issues", total, done, inProgress, todo: total - done - inProgress, issues,
     unestimated: measure === "points" ? h % 4 : 0, byStatus: {}, history: [], fetchedAt: new Date().toISOString(),
   };
+}
+
+// Invented history, so bar trends and burn-up charts have something to draw: done climbs slowly at first,
+// and the scope grows by a fifth along the way.
+function withHistory(r, days) {
+  if (!r.ok) return r;
+  const history = [];
+  for (let i = days; i >= 1; i--) {
+    const f = 1 - i / days;
+    history.push({ d: day(-i), done: Math.round(r.done * f * f), total: Math.round(r.total * (0.8 + 0.2 * f)) });
+  }
+  history.push({ d: day(0), done: r.done, total: r.total });
+  return { ...r, history };
 }
 
 const forSource = (s) => (s.kind === "issue" ? fake(s.key, s.measure) : { ...fake("JQL-" + hash(s.jql), s.measure), key: undefined, title: undefined, url: undefined, issueType: undefined, status: undefined });
@@ -100,15 +114,19 @@ function forMetric(m) {
 }
 
 function state() {
-  const progress = {}, auto = {}, boards = {}, metrics = {};
+  const progress = {}, auto = {}, boards = {}, metrics = {}, burnups = {};
   for (const w of room?.walls ?? []) {
     for (const p of w.panels) {
       if (p.type === "portfolio") for (const it of p.data.items) if (it.source) progress[it.id] = forSource(it.source);
+      if (p.type === "burnup" && p.data.source) burnups[p.id] = withHistory(forSource(p.data.source), 120);
       if (p.type === "kpi") for (const it of p.data.items) if (it.metric) metrics[it.id] = forMetric(it.metric);
       if (p.type === "kanban" && p.data.jira) boards[p.id] = forBoard(p.data.jira);
       if (p.type === "progress") {
-        for (const it of p.data.items) if (it.source.kind !== "manual") progress[it.id] = forSource(it.source);
-        if (p.data.auto) auto[p.id] = forAuto(p.data.auto);
+        for (const it of p.data.items) if (it.source.kind !== "manual") progress[it.id] = withHistory(forSource(it.source), 30);
+        if (p.data.auto) {
+          const a = forAuto(p.data.auto);
+          auto[p.id] = { ...a, bars: a.bars.map((b) => withHistory(b, 30)) };
+        }
       }
     }
   }
@@ -116,7 +134,7 @@ function state() {
   const pis = settings.pis.slice().sort((a, b) => a.start.localeCompare(b.start));
   const pi = pis.find((p) => p.start <= today && today <= p.end) ?? pis.filter((p) => p.start <= today).pop() ?? null;
   return {
-    room, version, updatedAt, progress, auto, boards, metrics,
+    room, version, updatedAt, progress, auto, boards, metrics, burnups,
     periods: { today, pi, nextPi: pi ? (pis.find((p) => p.start > pi.end) ?? null) : null, sprint: settings.jira.boardId ? { name: "Sprint 14", start: day(-8), end: day(5) } : null },
     sync: { jiraConfigured: true, running: false, lastRunAt: new Date().toISOString(), lastOk: true, lastError: null, intervalSeconds: 300 },
   };

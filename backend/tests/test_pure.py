@@ -2,7 +2,7 @@
 import unittest
 from datetime import date
 
-from obeya.periods import TemplateError, clean_calendar, field_ref, pick_pis, resolve_jql, sprint_period
+from obeya.periods import TemplateError, clean_calendar, field_ref, period_range, pick_pis, resolve_jql, sprint_period
 from obeya.progress import issue_view, tally, work_items
 from obeya.sources import normalize_auto, normalize_key, normalize_source, spec_id, text_values, _pointer
 from obeya.sync import collect_links
@@ -155,6 +155,17 @@ class Links(unittest.TestCase):
         self.assertIsNone(normalize_source({"kind": "jql", "jql": "  "}))
         self.assertIsNone(normalize_source("PLAT-1"))
 
+    def test_descend_is_part_of_a_query_link_only_when_switched_on(self):
+        plain = normalize_source({"kind": "jql", "jql": "project = PLAT"})
+        self.assertNotIn("descend", plain)
+        # A room saved by the editor says descend: false; that must still be the link it always was.
+        self.assertEqual(spec_id(normalize_source({"kind": "jql", "jql": "project = PLAT", "descend": False})), spec_id(plain))
+        deep = normalize_source({"kind": "jql", "jql": "project = PLAT", "descend": True})
+        self.assertIs(deep["descend"], True)
+        self.assertNotEqual(spec_id(deep), spec_id(plain))
+        self.assertNotIn("descend", normalize_source({"kind": "jql", "jql": "project = PLAT", "descend": "yes"}))
+        self.assertNotIn("descend", normalize_source({"kind": "issue", "key": "PLAT-1", "descend": True}))
+
     def test_normalize_auto_clamps_limit(self):
         self.assertEqual(normalize_auto({"jql": "x = 1", "limit": 5000})["limit"], 100)
         self.assertEqual(normalize_auto({"jql": "x = 1", "limit": "oops"})["limit"], 12)
@@ -227,6 +238,31 @@ class Links(unittest.TestCase):
         self.assertEqual(links.boards["k1"], links.boards["k3"])   # cards-per-column is display only
         self.assertEqual(list(links.metrics), ["m1"])
         self.assertEqual(len(links.specs), 2)
+
+    def test_collect_burnups(self):
+        room = {"walls": [{"id": "w", "panels": [
+            {"id": "u1", "type": "burnup", "data": {"source": {"kind": "jql", "jql": "project = PLAT"},
+                                                    "period": {"kind": "pi"}}},
+            {"id": "u2", "type": "burnup", "data": {"source": None, "period": {"kind": "sprint"}}},   # not linked yet
+            {"id": "u3", "type": "burnup", "data": {"source": {"kind": "manual", "done": 1, "total": 2}}},
+            {"id": "p1", "type": "progress", "data": {"items": [
+                {"id": "b1", "source": {"kind": "jql", "jql": "project = PLAT"}}]}},
+        ]}]}
+        links = collect_links(room)
+        self.assertEqual(list(links.burnups), ["u1"])
+        self.assertEqual(links.burn_periods, {"u1": {"kind": "pi"}})
+        self.assertEqual(links.burnups["u1"], links.items["b1"])   # a chart and a bar on one link share it
+        self.assertEqual(len(links.specs), 1)
+
+    def test_period_range(self):
+        current = {"pi": {"name": "PI 26.4", "start": "2026-10-05", "end": "2026-12-13"}, "sprint": None}
+        self.assertEqual(period_range({"kind": "pi"}, current), (date(2026, 10, 5), date(2026, 12, 13)))
+        self.assertIsNone(period_range({"kind": "sprint"}, current))             # no active sprint known
+        self.assertEqual(period_range({"kind": "dates", "start": "2026-11-01", "end": "2026-11-30"}, current),
+                         (date(2026, 11, 1), date(2026, 11, 30)))
+        for bad in ({"kind": "dates", "start": "2026-11-30", "end": "2026-11-01"}, {"kind": "dates", "start": ""},
+                    {"kind": "none"}, {}, None, "pi"):
+            self.assertIsNone(period_range(bad, current), bad)
 
 
 if __name__ == "__main__":

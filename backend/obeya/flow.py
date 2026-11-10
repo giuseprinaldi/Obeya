@@ -260,5 +260,28 @@ def lookback_value(kind: str, timelines: list[dict], end: datetime, window_days:
     return (round(value, 1) if value is not None else None), len(days)
 
 
+def burnup(items: list[tuple[dict, float]], moments: list[datetime],
+           done_statuses: Optional[list[str]] = None) -> list[tuple[float, float]]:
+    """(done, total) as they stood at each moment, replayed from history.
+
+    items are (timeline, weight) pairs: weight is 1 when counting issues, or the
+    story points. An issue counts towards the total from the moment it was
+    created, and towards done while it was done. History does not say when an
+    issue joined the scope or what its estimate used to be, so both are taken
+    as they are today.
+    """
+    out = []
+    for at in moments:
+        done = total = 0.0
+        for tl, weight in items:
+            if tl["created"] > at:
+                continue
+            total += weight
+            if done_at(tl, at, done_statuses) is not None:
+                done += weight
+        out.append((done, total))
+    return out
+
+
 def percent(part: float, whole: float) -> Optional[float]:
     return _num(round(100.0 * part / whole, 1)) if whole else None

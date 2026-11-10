@@ -78,7 +78,7 @@ function jiraSource(x: unknown): JiraSource | null {
   }
   if (x.kind === "jql") {
     const jql = str(x.jql).trim();
-    return jql ? { kind: "jql", jql, ...jiraOptions(x) } : null;
+    return jql ? { kind: "jql", jql, descend: x.descend === true, ...jiraOptions(x) } : null;
   }
   return null;
 }
@@ -248,8 +248,13 @@ function panel(x: Obj): Panel | null {
           autoDisplay: display(d.autoDisplay),
           sort: oneOf(d.sort, SORTS, "manual"),
           showKeys: d.showKeys !== false,
+          showTrend: d.showTrend !== false,
         },
       };
+    case "burnup": {
+      const period = pace(d.period);
+      return { ...base, type: "burnup", data: { source: jiraSource(d.source), period: period.kind === "none" ? { kind: "pi" } : period } };
+    }
     default:
       return null;
   }

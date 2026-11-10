@@ -9,14 +9,14 @@ import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 from .config import Config
-from .db import Database
+from .db import HISTORY_DAYS, Database
 from .jira_client import JiraClient, JiraError, JiraUnavailable
-from .periods import clean_calendar, pick_pis, sprint_period
-from .sources import (Engine, is_lookback, normalize_auto, normalize_board, normalize_metric,
+from .periods import TemplateError, clean_calendar, period_range, pick_pis, sprint_period
+from .sources import (Engine, SourceError, is_lookback, normalize_auto, normalize_board, normalize_metric,
                       normalize_source, spec_id)
 
 log = logging.getLogger("obeya.sync")
@@ -34,6 +34,8 @@ class Links:
     autos: dict[str, str] = field(default_factory=dict)      # progress panel id -> sid
     boards: dict[str, str] = field(default_factory=dict)     # flow board panel id -> sid
     metrics: dict[str, str] = field(default_factory=dict)    # KPI item id -> sid
+    burnups: dict[str, str] = field(default_factory=dict)    # burn-up panel id -> sid
+    burn_periods: dict[str, Any] = field(default_factory=dict)   # burn-up panel id -> its period setting
 
     def add(self, owners: dict[str, str], owner_id: Any, spec: Optional[dict]) -> None:
         if spec and owner_id:
@@ -65,6 +67,10 @@ def collect_links(room: Any) -> Links:
             if kind == "kpi":
                 for item in items:
                     links.add(links.metrics, item.get("id"), normalize_metric(item.get("metric")))
+            if kind == "burnup":
+                links.add(links.burnups, panel.get("id"), normalize_source(data.get("source")))
+                if str(panel.get("id") or "") in links.burnups:
+                    links.burn_periods[str(panel["id"])] = data.get("period")
     return links
 
 
@@ -130,13 +136,18 @@ class Syncer:
 
     def _run(self, full: bool, force: bool = False) -> int:
         row = self.db.get_room()
-        all_specs = collect_links(row["doc"] if row else None).specs
+        links = collect_links(row["doc"] if row else None)
         if not self.cfg.jira_configured:
             return 0
         settings = self.db.get_settings()
         if full:
             self._refresh_sprint(settings)
-        have = self.db.cached_results(list(all_specs))
+        count = self._compute(links.specs, settings, full, force)
+        self._backfill(links, settings)
+        return count
+
+    def _compute(self, all_specs: dict[str, dict], settings: dict, full: bool, force: bool) -> int:
+        have =self.db.cached_results(list(all_specs))
         if full:
             specs = {sid: s for sid, s in all_specs.items()
                      if force or not is_lookback(s) or not _fresh(have.get(sid))}
@@ -165,6 +176,50 @@ class Syncer:
                 snapshots.append((sid, result["done"], result["total"]))
         self.db.store_results(results, snapshots, date.today(), keep_sids=list(all_specs) if full else None)
         return len(specs)
+
+    def _backfill(self, links: Links, settings: dict) -> None:
+        """A burn-up chart is only useful with the days before its link existed, so
+        those are replayed from Jira's issue histories: once per link, and again
+        only if the chart is later asked to start earlier. Days that already have
+        a snapshot are never overwritten."""
+        today = date.today()
+        current = self.periods(settings, today)
+        oldest = today - timedelta(days=HISTORY_DAYS - 1)
+        wanted: dict[str, date] = {}
+        for panel_id, sid in links.burnups.items():
+            span = period_range(links.burn_periods.get(panel_id), current)
+            if span is None:
+                continue
+            start = max(span[0], oldest)
+            if start < today and start < wanted.get(sid, today):
+                wanted[sid] = start
+        seen = self.db.kv_get("backfill")
+        seen = seen if isinstance(seen, dict) else {}
+        record = {sid: entry for sid, entry in seen.items() if sid in wanted and isinstance(entry, dict)}
+        cache = self.db.cached_results(list(wanted)) if wanted else {}
+        engine: Optional[Engine] = None
+        try:
+            for sid, start in wanted.items():
+                if not (cache.get(sid) or {}).get("ok"):
+                    continue
+                entry = record.get(sid) or {}
+                covered = str(entry.get("from") or "9999") <= start.isoformat()
+                if covered and (entry.get("ok") or _recent(entry.get("at"))):
+                    continue
+                engine = engine or self.engine(settings, today)
+                ok = True
+                try:
+                    self.db.fill_history(sid, engine.daily_history(links.specs[sid], start, today - timedelta(days=1)))
+                except JiraUnavailable:
+                    raise
+                except (SourceError, TemplateError, JiraError) as err:
+                    ok = False   # tried again after a while, not on every run
+                    log.warning("Could not work out the earlier days of a burn-up chart: %s", err)
+                record[sid] = {"from": start.isoformat(), "ok": ok,
+                               "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        finally:
+            if record != seen:
+                self.db.kv_set("backfill", record)
 
     def _refresh_sprint(self, settings: dict) -> None:
         board = (settings.get("jira") or {}).get("boardId")
@@ -231,7 +286,7 @@ class Syncer:
 
     def results_for(self, room: Any) -> dict[str, dict[str, dict]]:
         """Map cached results onto the items and panels that own the links.
-        Returns {"progress", "auto", "boards", "metrics"}, each keyed by owner id."""
+        Returns {"progress", "auto", "boards", "metrics", "burnups"}, each keyed by owner id."""
         links = collect_links(room)
         cache = self.db.cached_results(list(links.specs))
         snapshot_metrics = {sid for sid in set(links.metrics.values())
@@ -252,6 +307,11 @@ class Syncer:
                                   for b in result.get("bars") or []]
                 auto[panel_id] = result
         boards = {panel_id: cache[sid] for panel_id, sid in links.boards.items() if sid in cache}
+        # A burn-up chart draws a whole PI, so it gets everything that is kept.
+        burn_history = self.db.history(sorted({sid for sid in links.burnups.values() if sid in cache}),
+                                       days=HISTORY_DAYS)
+        burnups = {panel_id: {**cache[sid], "history": burn_history.get(sid, [])}
+                   for panel_id, sid in links.burnups.items() if sid in cache}
         metrics = {}
         for item_id, sid in links.metrics.items():
             if sid not in cache:
@@ -260,15 +320,18 @@ class Syncer:
             if sid in snapshot_metrics:
                 result = {**result, "history": [{"d": h["d"], "value": h["done"]} for h in history.get(sid, [])]}
             metrics[item_id] = result
-        return {"progress": progress, "auto": auto, "boards": boards, "metrics": metrics}
+        return {"progress": progress, "auto": auto, "boards": boards, "metrics": metrics, "burnups": burnups}
 
 
 def _fresh(result: Optional[dict]) -> bool:
     """A good cached result that is younger than the look-back refresh interval."""
-    if not result or not result.get("ok"):
-        return False
+    return bool(result and result.get("ok")) and _recent(result.get("fetchedAt"))
+
+
+def _recent(stamp: Any) -> bool:
+    """An ISO timestamp from less than the look-back refresh interval ago."""
     try:
-        fetched = datetime.fromisoformat(str(result.get("fetchedAt")))
+        then = datetime.fromisoformat(str(stamp))
     except ValueError:
         return False
-    return (datetime.now(timezone.utc) - fetched).total_seconds() < LOOKBACK_TTL_SECONDS
+    return (datetime.now(timezone.utc) - then).total_seconds() < LOOKBACK_TTL_SECONDS

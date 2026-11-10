@@ -66,6 +66,24 @@ def sprint_period(sprint: Any) -> Optional[dict]:
     return {"name": name, "start": start.isoformat(), "end": end.isoformat()}
 
 
+def period_range(period: Any, current: dict) -> Optional[tuple[date, date]]:
+    """The dates a burn-up chart covers: the current PI, the active sprint, or its own dates.
+
+    `period` is {"kind": "pi" | "sprint"} or {"kind": "dates", "start", "end"} from the room;
+    `current` is what screens are given, {"pi": ..., "sprint": ...}. None when it is not known.
+    """
+    if not isinstance(period, dict):
+        return None
+    kind = period.get("kind")
+    source = current.get(kind) if kind in ("pi", "sprint") else period if kind == "dates" else None
+    if not isinstance(source, dict):
+        return None
+    start, end = parse_date(source.get("start")), parse_date(source.get("end"))
+    if not start or not end or end < start:
+        return None
+    return start, end
+
+
 def field_ref(field_id: str) -> str:
     """How to name a field in JQL: cf[10500] for custom fields, else the id itself."""
     m = re.fullmatch(r"customfield_(\d+)", field_id or "")

@@ -198,11 +198,64 @@ a.key:hover{color:var(--accent);border-color:var(--accent)}
 .pbar.is-error .pbar-msg{color:var(--warn)}
 .pbar-note{margin:10px 0 0;font-size:12px;color:var(--muted)}
 .pbar-note.is-error{color:var(--warn)}
+/* new: trend column on progress bars (a small line of percent done, and the change over the last week) */
+.pbars.with-trend{grid-template-columns:minmax(0,1.25fr) minmax(110px,2fr) auto auto}
+.pbars.with-trend .pbar{grid-column:span 4;grid-template-areas:"label track trend val"}
+.pbar-trend{grid-area:trend;display:flex;align-items:center;gap:7px;font:500 11.5px var(--mono);font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
+.pbar-trend b{font-weight:600;color:var(--ink)}
+.pbar-spark{flex:none;overflow:visible}
+.pbar-spark polyline{fill:none;stroke:var(--muted);stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.pbar-spark circle{fill:var(--bc);stroke:var(--surface);stroke-width:1.5}
+@container (max-width:700px){ .pbar-spark{display:none} }
 @container (max-width:520px){
-  .pbars{grid-template-columns:minmax(0,1fr) auto}
-  .pbar{grid-column:span 2;grid-template-areas:"label val" "track track"}
+  .pbars,.pbars.with-trend{grid-template-columns:minmax(0,1fr) auto}
+  .pbar,.pbars.with-trend .pbar{grid-column:span 2;grid-template-areas:"label val" "track track"}
   .pbar-msg{grid-column:1 / -1}
+  .pbar-trend{display:none}
 }
+
+/* new: Burn-up chart. The plot is a stretched SVG, so strokes do not scale and dots and labels are HTML on top. */
+.panel-body:has(> .burn){display:flex;flex-direction:column}
+.burn{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px}
+.burn-nums{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 9px}
+.burn-big{font:600 30px/1 var(--mono);color:var(--ink)}
+.burn-of{font-size:13px;color:var(--muted)}
+.burn-nums .pill{align-self:center}
+.burn-nums .key{margin-left:0;align-self:center}
+.burn-sub{margin-top:5px;font:500 11.5px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.burn-note{margin-top:3px;font-size:12.5px;color:var(--ink)}
+.burn-plot{flex:1;min-height:170px;display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto;column-gap:8px;row-gap:5px}
+.burn-y{position:relative;min-width:22px;font:500 10.5px var(--mono);font-variant-numeric:tabular-nums;color:var(--muted)}
+.burn-y span{position:absolute;right:0;transform:translateY(50%);line-height:1;white-space:nowrap}
+/* The labels are placed by value, so an invisible copy of the widest one gives the column its width. */
+.burn-y .sizer{position:static;display:block;height:0;visibility:hidden;transform:none}
+.burn-area{position:relative;min-width:0}
+.burn-area svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.burn-area svg *{vector-effect:non-scaling-stroke;fill:none}
+.burn-area .grid{stroke:var(--line);stroke-width:1}
+.burn-area .today{stroke:var(--muted);stroke-width:1;opacity:.6}
+.burn-area .ideal{stroke:var(--muted);stroke-width:1.25;stroke-dasharray:5 4}
+.burn-area .scope{stroke:var(--ink);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.burn-area .done{stroke:var(--bc);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.burn-area .area{fill:var(--bc);opacity:.1}
+.burn-area .forecast{stroke:var(--bc);stroke-width:2;stroke-dasharray:2 5;stroke-linecap:round}
+.burn-dot{position:absolute;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;border:2px solid var(--surface);background:var(--ink);pointer-events:none}
+.burn-dot.done{background:var(--bc)}
+.burn-cross{position:absolute;top:0;bottom:0;width:1px;margin-left:-.5px;background:var(--ink);opacity:.45;pointer-events:none}
+.burn-tip{position:absolute;top:6px;z-index:2;margin-left:10px;display:grid;gap:3px;background:var(--surface);border:1px solid var(--line);border-radius:5px;padding:7px 9px;font-size:12px;color:var(--muted);white-space:nowrap;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.14)}
+.burn-tip.flip{margin-left:-10px;transform:translateX(-100%)}
+.burn-tip .when{font:500 10.5px var(--mono);text-transform:uppercase;letter-spacing:.06em}
+.burn-tip .tip-row{display:flex;align-items:center;gap:6px}
+.burn-tip b{font:600 12.5px var(--mono);font-variant-numeric:tabular-nums;color:var(--ink)}
+.burn-x{grid-column:2;position:relative;display:flex;justify-content:space-between;font:500 10.5px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.burn-x .now{position:absolute;transform:translateX(-50%);color:var(--ink)}
+.burn-legend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px;color:var(--muted)}
+.burn-legend span{display:inline-flex;align-items:center;gap:6px}
+/* Line keys: a short stroke in the series colour, dashed where the line is. */
+.k{display:inline-block;flex:none;width:16px;height:0;border-top:2px solid var(--ink)}
+.k.done{border-top-color:var(--bc)}
+.k.ideal{border-top:1.5px dashed var(--muted)}
+.k.forecast{border-top:2px dotted var(--bc)}
 
 /* Overview */
 .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:22px}
@@ -328,6 +381,13 @@ body.tv:not(.pointer){cursor:none}
 .tv-grid .span-3 .pbars:has(.pbar:nth-child(5)){grid-template-columns:repeat(2,minmax(0,1.25fr) minmax(110px,2fr) auto)}
 .tv-grid .span-3 .pbars:has(.pbar:nth-child(5)) .pbar:nth-child(odd){padding-right:26px}
 .tv-grid .span-3 .pbars:has(.pbar:nth-child(5)) .pbar:nth-last-child(2):nth-child(odd){border-bottom:0}
+.tv-grid .span-3 .pbars.with-trend:has(.pbar:nth-child(5)){grid-template-columns:repeat(2,minmax(0,1.25fr) minmax(110px,2fr) auto auto)}
+.tv-grid .pbar-trend{font-size:13px}
+.tv-grid .burn-plot{min-height:110px}
+.tv-grid .burn-big{font-size:40px}
+.tv-grid .burn-of{font-size:16px}
+.tv-grid .burn-sub,.tv-grid .burn-y,.tv-grid .burn-x{font-size:12.5px}
+.tv-grid .burn-note,.tv-grid .burn-legend{font-size:14.5px}
 .tv-grid .pbar{padding:11px 0}
 .tv-grid .pbar .rt{font-size:16px}
 .tv-grid .pbar-track{height:16px}

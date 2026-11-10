@@ -1,6 +1,7 @@
 /* Status rules: what counts as off target, late, blocked or behind, and how that rolls up. */
 import type { ActionItem, Panel, Status } from "../types";
 import { boardView } from "./board";
+import { burnupView } from "./burnup";
 import { effectiveKpi } from "./kpi";
 import { resolveBars, type LiveData } from "./progress";
 
@@ -18,11 +19,11 @@ export interface Signals {
   open: number;
   off: number;
   risk: number;
-  /** Progress bars behind pace. */
+  /** Progress bars and burn-up charts behind pace. */
   barBad: number;
-  /** Progress bars at risk of falling behind. */
+  /** Progress bars and burn-up charts at risk of falling behind. */
   barWarn: number;
-  /** Jira links that failed: bars, panel queries, Jira KPIs and Jira boards. */
+  /** Jira links that failed: bars, panel queries, Jira KPIs, Jira boards and burn-up charts. */
   jiraFailing: number;
   items: number;
 }
@@ -94,6 +95,16 @@ export function signals(panels: Panel[], live: LiveData): Signals {
           if (b.status === "bad") s.barBad++;
           else if (b.status === "warn") s.barWarn++;
         }
+        break;
+      }
+      case "burnup": {
+        // A chart counts like one bar: behind pace, at risk, or a link that failed.
+        const v = burnupView(p, live);
+        if (v.state === "error") s.jiraFailing++;
+        if (v.state !== "ok" || v.total <= 0) break;
+        s.items++;
+        if (v.status === "bad") s.barBad++;
+        else if (v.status === "warn") s.barWarn++;
         break;
       }
       case "statement":

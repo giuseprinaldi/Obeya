@@ -263,7 +263,8 @@ def run_diagnostics(client: Optional[JiraClient], settings: dict, configured: bo
         issue = finished[0] if finished else sample.get("issue")
         if not issue:
             return (SKIP, "No issue was available to look at.")
-        needs = "Cycle time, lead time, throughput, blocked days and \"added after the sprint started\" need them."
+        needs = ("Cycle time, lead time, throughput, blocked days, \"added after the sprint started\" and the "
+                 "earlier days of burn-up charts need them.")
         log = issue.get("changelog")
         if not isinstance(log, dict) or not isinstance(log.get("histories"), list):
             return (FAIL, "Searches do not return issue histories.", needs)

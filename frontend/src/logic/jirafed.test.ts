@@ -15,6 +15,7 @@ const live = (over: Partial<LiveData> = {}): LiveData => ({
   auto: {},
   boards: {},
   metrics: {},
+  burnups: {},
   periods: { today: "2026-11-10", pi: null, nextPi: null, sprint: null },
   jiraConfigured: true,
   ...over,

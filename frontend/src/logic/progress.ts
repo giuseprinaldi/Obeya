@@ -13,6 +13,7 @@ import type {
   ProgressResult,
   Status,
 } from "../types";
+import { barTrend, type BarTrend } from "./trend";
 import { clamp, daysBetween, fmtNum } from "./util";
 
 /** Everything the server sends next to the room. */
@@ -23,6 +24,8 @@ export interface LiveData {
   boards: Record<string, BoardResult>;
   /** Jira-fed KPIs, keyed by KPI id. */
   metrics: Record<string, MetricResult>;
+  /** Burn-up charts, keyed by panel id. */
+  burnups: Record<string, ProgressResult>;
   periods: Periods;
   jiraConfigured: boolean;
 }
@@ -44,19 +47,20 @@ export const defaultJiraOptions = (): JiraSourceOptions => ({
 export const PACE_OK = 5;
 export const PACE_RISK = 20;
 
+/** The dates a pace setting stands for, with the name of the sprint or PI. Null when there are none:
+    no pace check, or no sprint or PI is known right now. */
+export function paceDates(pace: Pace, periods: Periods): { name: string; start: string; end: string } | null {
+  if (pace.kind === "none") return null;
+  if (pace.kind === "sprint") return periods.sprint;
+  if (pace.kind === "pi") return periods.pi;
+  return { name: "", start: pace.start, end: pace.end };
+}
+
 /** Where a bar should be today: linear between the period's start and end. Null when unknown. */
 export function expectedPct(pace: Pace, periods: Periods): number | null {
-  let start: string, end: string;
-  if (pace.kind === "none") return null;
-  if (pace.kind === "sprint") {
-    if (!periods.sprint) return null;
-    ({ start, end } = periods.sprint);
-  } else if (pace.kind === "pi") {
-    if (!periods.pi) return null;
-    ({ start, end } = periods.pi);
-  } else {
-    ({ start, end } = pace);
-  }
+  const dates = paceDates(pace, periods);
+  if (!dates) return null;
+  const { start, end } = dates;
   const span = daysBetween(start, end);
   const gone = daysBetween(start, periods.today);
   if (span === null || gone === null || span < 0) return null;
@@ -101,13 +105,15 @@ export interface BarView {
   emptyText: string;
   expected: number | null;
   status: Status;
+  /** How a Jira-linked bar has moved lately. Null for manual bars and until there is a day to compare with. */
+  trend: BarTrend | null;
 }
 
-const UNIT: Record<ProgressResult["unit"], string> = { issues: "issues", points: "pts" };
+export const UNIT: Record<ProgressResult["unit"], string> = { issues: "issues", points: "pts" };
 
 function measured(
   base: Pick<BarView, "id" | "itemId" | "label" | "keyText" | "url" | "owner" | "note" | "display">,
-  n: { done: number; total: number; inProgress: number; unit: string; unestimated: number; emptyText: string },
+  n: { done: number; total: number; inProgress: number; unit: string; unestimated: number; emptyText: string; history?: ProgressResult["history"] },
   periods: Periods,
 ): BarView {
   const has = n.total > 0;
@@ -127,6 +133,7 @@ function measured(
     emptyText: has ? "" : n.emptyText,
     expected,
     status: has ? barStatus(pct, expected) : "none",
+    trend: has ? barTrend(n.history, n, periods.today) : null,
   };
 }
 
@@ -148,6 +155,7 @@ function unavailable(
     emptyText: "",
     expected: null,
     status: state === "error" ? "warn" : "none",
+    trend: null,
   };
 }
 
@@ -173,6 +181,7 @@ function fromResult(
       unit: UNIT[r.unit] ?? "issues",
       unestimated: r.unit === "points" ? r.unestimated : 0,
       emptyText: r.unit === "points" ? "No estimates yet" : "No issues yet",
+      history: r.history,
     },
     periods,
   );

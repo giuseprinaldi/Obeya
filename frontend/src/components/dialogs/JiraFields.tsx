@@ -5,7 +5,7 @@ import { describeBoard } from "../../logic/board";
 import { JQL_HINT, JQL_PRESETS, parseIssueKey, parseStatusList } from "../../logic/jira";
 import { defaultJiraOptions } from "../../logic/progress";
 import { dayNumber, fmtNum } from "../../logic/util";
-import type { AutoResult, BarColor, BarDisplay, JiraBoard, JiraSource, JiraSourceOptions, Measure, MetricResult, PreviewRequest, ProgressResult, ValueFormat } from "../../types";
+import type { AutoResult, BarColor, BarDisplay, BurnPeriod, JiraBoard, JiraSource, JiraSourceOptions, Measure, MetricResult, Pace, PreviewRequest, ProgressResult, ValueFormat } from "../../types";
 import { CheckField, SelectField, TextArea, TextField } from "../Dialog";
 
 /* ---------- Draft of a Jira link, as typed into the form ---------- */
@@ -22,6 +22,8 @@ export interface LinkDraft extends OptionsDraft {
   /** A key or a pasted Jira URL. */
   keyInput: string;
   jql: string;
+  /** Query links only: measure the work under each match. */
+  descend: boolean;
 }
 
 export function optionsDraft(o?: JiraSourceOptions | null): OptionsDraft {
@@ -38,6 +40,7 @@ export function linkDraft(src?: JiraSource | null): LinkDraft {
     kind: src?.kind ?? "issue",
     keyInput: src?.kind === "issue" ? src.key : "",
     jql: src?.kind === "jql" ? src.jql : "",
+    descend: src?.kind === "jql" ? src.descend : false,
     ...optionsDraft(src),
   };
 }
@@ -51,7 +54,7 @@ export function linkSource(d: LinkDraft): JiraSource | string {
   }
   const jql = d.jql.trim();
   if (!jql) return "Enter a Jira query.";
-  return { kind: "jql", jql, ...optionsOf(d) };
+  return { kind: "jql", jql, descend: d.descend, ...optionsOf(d) };
 }
 
 /* ---------- Fields ---------- */
@@ -122,7 +125,15 @@ export function LinkFields({ value, onChange }: { value: LinkDraft; onChange: (v
           }
         />
       ) : (
-        <JqlInput value={value.jql} onChange={(jql) => onChange({ ...value, jql })} />
+        <>
+          <JqlInput value={value.jql} onChange={(jql) => onChange({ ...value, jql })} />
+          <CheckField
+            label="Count the work under each match instead of the matches themselves"
+            checked={value.descend}
+            onChange={(descend) => onChange({ ...value, descend })}
+            hint="For a query that finds epics or initiatives: they are measured by the stories beneath them, as a linked issue is. Work found twice is counted once."
+          />
+        </>
       )}
       <OptionsFields value={value} onChange={onChange} />
     </>
@@ -302,10 +313,45 @@ export function DisplayFields({ value, onChange }: { value: BarDisplay; onChange
   );
 }
 
-/** What is wrong with a bar's display settings, or "". */
-export function displayError(d: BarDisplay): string {
-  if (d.pace.kind !== "dates") return "";
-  if (dayNumber(d.pace.start) === null || dayNumber(d.pace.end) === null) return "Give the custom pace a start and an end date.";
-  if (d.pace.end < d.pace.start) return "The custom pace ends before it starts.";
+/** What is wrong with a pair of custom dates, or "". `what` names the thing they belong to: "the custom pace". */
+export function datesError(pace: Pace, what: string): string {
+  if (pace.kind !== "dates") return "";
+  if (dayNumber(pace.start) === null || dayNumber(pace.end) === null) return `Give ${what} a start and an end date.`;
+  if (pace.end < pace.start) return `${what.charAt(0).toUpperCase()}${what.slice(1)} ends before it starts.`;
   return "";
+}
+
+/** What is wrong with a bar's display settings, or "". */
+export const displayError = (d: BarDisplay): string => datesError(d.pace, "the custom pace");
+
+/* ---------- The dates a burn-up chart covers ---------- */
+
+const BURN_PERIODS: readonly (readonly [BurnPeriod["kind"], string])[] = [
+  ["pi", "Current PI"],
+  ["sprint", "Current sprint"],
+  ["dates", "Custom dates"],
+];
+
+export function PeriodFields({ value, onChange }: { value: BurnPeriod; onChange: (v: BurnPeriod) => void }) {
+  const setKind = (kind: BurnPeriod["kind"]): void => {
+    if (kind === "dates") onChange({ kind, start: value.kind === "dates" ? value.start : "", end: value.kind === "dates" ? value.end : "" });
+    else onChange({ kind });
+  };
+  return (
+    <>
+      <SelectField
+        label="The chart covers"
+        value={value.kind}
+        onChange={setKind}
+        options={BURN_PERIODS}
+        hint="PI and sprint dates follow the PI calendar and Jira, so the chart starts again by itself when they roll over."
+      />
+      {value.kind === "dates" ? (
+        <div className="two">
+          <TextField label="Start" type="date" value={value.start} onChange={(start) => onChange({ ...value, start })} />
+          <TextField label="End" type="date" value={value.end} onChange={(end) => onChange({ ...value, end })} />
+        </div>
+      ) : null}
+    </>
+  );
 }

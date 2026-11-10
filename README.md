@@ -16,12 +16,13 @@ A configurable digital Obeya room for leadership and program management. Each wa
   - Statement: true north, a goal or a focus statement
   - KPI tracker: actual against target, with a trend sparkline; the value can come from Jira
   - Portfolio: initiatives with health, progress and horizon; progress can come from Jira
-  - Progress bars: Jira-linked or manual bars, with an optional pace marker
+  - Progress bars: Jira-linked or manual bars, with an optional pace marker and a trend showing how each bar moved over the last week
+  - Burn-up chart: done against scope, day by day, across a PI, a sprint or chosen dates, with a forecast
   - Problem solving: problems moving through Define, Analyze, Countermeasure, Verify and Closed
   - Action tracker: owner, due date and done, with late actions flagged
   - Flow board: columns with WIP limits and drag-and-drop cards, or a live read-only view of a Jira board
 - **Display mode** (`#screen-N`): a dark theme that scales to fill the screen, with a clock, the current PI and sprint, and an "updated" stamp. Controls and the mouse cursor hide when the mouse is idle. The arrow keys switch walls and Escape exits. Screens can be set to rotate when there are fewer TVs than walls.
-- **Status encoding:** colored stripes and labels for KPIs off target, initiatives at risk, blocked work, columns over their WIP limit, high-severity problems, late actions and bars behind pace.
+- **Status encoding:** colored stripes and labels for KPIs off target, initiatives at risk, blocked work, columns over their WIP limit, high-severity problems, late actions, and bars and burn-up charts behind pace.
 - **Customize:** room name, accent color, separate themes for laptops and TVs, density, three room templates (Program, Leadership, Team delivery) and a JSON backup and import.
 
 ## Jira-linked progress
@@ -29,10 +30,14 @@ A configurable digital Obeya room for leadership and program management. Each wa
 A progress bar can be linked three ways, all from the editor:
 
 - **A Jira issue.** Paste a key or a Jira URL. Progress is measured across everything beneath it, so an initiative is measured by the stories under its epics.
-- **A Jira query (JQL).** Progress is measured across the issues the query matches, for example `sprint in openSprints()`.
+- **A Jira query (JQL).** Progress is measured across the issues the query matches, for example `sprint in openSprints()`. Tick "Count the work under each match" and it measures what sits beneath them instead, so a query for the epics in the current PI is measured by their stories.
 - **Auto-fill.** A progress panel can take a query, and every issue it matches becomes its own bar, for example every epic in the current PI.
 
 Each bar chooses issue count or story points, which statuses count as done, its label, color, value format and pace marker.
+
+The server keeps one snapshot of every link per day. Bars use it to show a small trend line and the change over the last week ("+4 in 7d"), which can be switched off per panel.
+
+A **burn-up chart** panel is linked the same way, to an issue or a query, and covers the current PI, the current sprint or dates you choose. It draws scope and done for each day, an even-pace line, and a forecast from the pace of the last two weeks. The days from before the chart was added are worked out once from Jira's issue histories, so the chart is filled in from the start.
 
 ## Jira flow boards and KPIs
 

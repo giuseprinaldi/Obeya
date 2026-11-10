@@ -3,6 +3,8 @@ import type {
   ActionsPanel,
   AccentKey,
   BarDisplay,
+  BurnPeriod,
+  BurnupPanel,
   JiraSource,
   KanbanPanel,
   KpiPanel,
@@ -42,6 +44,7 @@ export const PANEL_TYPES: Record<PanelType, { label: string; desc: string; item:
   kpi: { label: "KPI tracker", desc: "Actual vs target with trend", item: "KPI" },
   portfolio: { label: "Portfolio", desc: "Initiatives with health and progress", item: "Initiative" },
   progress: { label: "Progress bars", desc: "Jira-linked or manual progress", item: "Bar" },
+  burnup: { label: "Burn-up chart", desc: "Done against scope over a PI or sprint", item: "" },
   problems: { label: "Problem solving", desc: "Problems moving through A3 stages", item: "Problem" },
   actions: { label: "Action tracker", desc: "Owners, due dates, done", item: "Action" },
   kanban: { label: "Flow board", desc: "Columns with WIP limits", item: "Card" },
@@ -80,7 +83,9 @@ export function newPanel(type: PanelType, title: string, span: Span): Panel {
         },
       };
     case "progress":
-      return { ...base, type, data: { items: [], auto: null, autoDisplay: defaultDisplay(), sort: "manual", showKeys: true } };
+      return { ...base, type, data: { items: [], auto: null, autoDisplay: defaultDisplay(), sort: "manual", showKeys: true, showTrend: true } };
+    case "burnup":
+      return { ...base, type, data: { source: null, period: { kind: "pi" } } };
     case "kpi":
       return { ...base, type, data: { items: [] } };
     case "portfolio":
@@ -162,8 +167,9 @@ const P = {
     type: "progress",
     title,
     span,
-    data: { items, auto: null, autoDisplay: defaultDisplay(), sort: "manual", showKeys: true, ...extra },
+    data: { items, auto: null, autoDisplay: defaultDisplay(), sort: "manual", showKeys: true, showTrend: true, ...extra },
   }),
+  burnup: (title: string, source: JiraSource, period: BurnPeriod, span: Span = 2): BurnupPanel => ({ id: uid(), type: "burnup", title, span, data: { source, period } }),
 };
 
 const paced = (pace: BarDisplay["pace"]): BarDisplay => ({ ...defaultDisplay(), pace });
@@ -219,6 +225,9 @@ export const LIBRARY: Record<string, { name: string; build: () => WallSeed }> = 
           ],
           3,
         ),
+        // The epics of the current PI, measured by the story points under them: it follows the PI by itself.
+        P.burnup("PI burn-up", { kind: "jql", jql: 'issuetype = Epic AND {PI_FIELD} = "{PI}"', descend: true, ...defaultJiraOptions(), measure: "points" }, { kind: "pi" }, 2),
+        P.burnup("Sprint burn-up", { kind: "jql", jql: "sprint in openSprints()", descend: false, ...defaultJiraOptions(), measure: "points" }, { kind: "sprint" }, 1),
       ],
     }),
   },
@@ -246,7 +255,7 @@ export const LIBRARY: Record<string, { name: string; build: () => WallSeed }> = 
               label: "Sprint scope",
               owner: "",
               note: "",
-              source: { kind: "jql", jql: "sprint in openSprints()", ...defaultJiraOptions(), measure: "points" },
+              source: { kind: "jql", jql: "sprint in openSprints()", descend: false, ...defaultJiraOptions(), measure: "points" },
               ...paced({ kind: "sprint" }),
             },
           ],

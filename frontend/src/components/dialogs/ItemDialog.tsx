@@ -8,7 +8,7 @@ import { findPanel } from "../../ui";
 import { CheckField, Dialog, Segmented, SelectField, TextArea, TextField } from "../Dialog";
 import { CheckLink, LinkFields, linkDraft, linkSource, type LinkDraft } from "./JiraFields";
 
-type ItemPanel = Exclude<Panel, { type: "statement" } | { type: "progress" } | { type: "kpi" }>;
+type ItemPanel = Exclude<Panel, { type: "statement" } | { type: "progress" } | { type: "kpi" } | { type: "burnup" }>;
 type Vals = Record<string, string | boolean>;
 
 interface FieldDef {
@@ -140,13 +140,14 @@ function apply(room: Room, panelId: string, itemId: string | undefined, v: Vals,
     case "statement":
     case "progress":
     case "kpi":
+    case "burnup":
       break;
   }
 }
 
 function remove(room: Room, panelId: string, itemId: string): void {
   const p = findPanel(room, panelId)?.panel;
-  if (!p || p.type === "statement") return;
+  if (!p || p.type === "statement" || p.type === "burnup") return;
   if (p.type === "kanban") p.data.cards = p.data.cards.filter((x) => x.id !== itemId);
   else if (p.type === "kpi") p.data.items = p.data.items.filter((x) => x.id !== itemId);
   else if (p.type === "portfolio") p.data.items = p.data.items.filter((x) => x.id !== itemId);

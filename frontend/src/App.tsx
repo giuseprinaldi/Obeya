@@ -29,7 +29,7 @@ function RoomDialog({ spec, room, close }: { spec: Exclude<DialogSpec, { kind: "
   switch (spec.kind) {
     case "item": {
       const p = findPanel(room, spec.panelId)?.panel;
-      if (!p || p.type === "statement" || p.type === "progress") return null;
+      if (!p || p.type === "statement" || p.type === "progress" || p.type === "burnup") return null;
       if (p.type === "kpi") return <KpiDialog panel={p} itemId={spec.itemId} onClose={close} />;
       return <ItemDialog panel={p} itemId={spec.itemId} col={spec.col} onClose={close} />;
     }
@@ -76,7 +76,7 @@ export function App() {
     }),
     [canEdit],
   );
-  const live = useMemo(() => liveOf(s), [s.progress, s.auto, s.boards, s.metrics, s.periods, s.sync.jiraConfigured]);
+  const live = useMemo(() => liveOf(s), [s.progress, s.auto, s.boards, s.metrics, s.burnups, s.periods, s.sync.jiraConfigured]);
   const room = s.room;
 
   useEffect(() => {

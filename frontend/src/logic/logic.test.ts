@@ -4,7 +4,7 @@ import { parseIssueKey, parseStatusList } from "./jira";
 import { looksLikeRoom, normalizeRoom } from "./normalize";
 import { bumpName, calendarError, calendarNotice, nextPi, periodLine, piContaining, roomUsesPi } from "./periods";
 import { barPill, barStatus, defaultDisplay, defaultJiraOptions, expectedPct, itemBar, portfolioProgress, resolveBars, valueText, type LiveData } from "./progress";
-import { seed } from "./seed";
+import { buildWall, seed } from "./seed";
 import { badCount, chipList, isLate, kpiStatus, panelStatus, signals } from "./status";
 import { gridRows, tvRowWeights } from "./tvlayout";
 import { addDays, dayNumber, daysBetween, todayISO } from "./util";
@@ -17,7 +17,7 @@ const periods = (over: Partial<Periods> = {}): Periods => ({
   ...over,
 });
 
-const live = (over: Partial<LiveData> = {}): LiveData => ({ progress: {}, auto: {}, boards: {}, metrics: {}, periods: periods(), jiraConfigured: true, ...over });
+const live = (over: Partial<LiveData> = {}): LiveData => ({ progress: {}, auto: {}, boards: {}, metrics: {}, burnups: {}, periods: periods(), jiraConfigured: true, ...over });
 
 const result = (over: Partial<ProgressResult> = {}): ProgressResult => ({
   ok: true,
@@ -54,7 +54,7 @@ const progressPanel = (data: Partial<ProgressPanel["data"]> = {}): ProgressPanel
   type: "progress",
   title: "PI objectives",
   span: 3,
-  data: { items: [], auto: null, autoDisplay: defaultDisplay(), sort: "manual", showKeys: true, ...data },
+  data: { items: [], auto: null, autoDisplay: defaultDisplay(), sort: "manual", showKeys: true, showTrend: true, ...data },
 });
 
 describe("dates", () => {
@@ -302,7 +302,9 @@ describe("PI calendar", () => {
   });
   it("knows when a room depends on the calendar", () => {
     expect(roomUsesPi(seed("program"))).toBe(true);
-    expect(roomUsesPi(seed("leadership"))).toBe(false);
+    // The Performance wall carries a PI burn-up chart, so only a room without it is free of the calendar.
+    expect(roomUsesPi(seed("leadership"))).toBe(true);
+    expect(roomUsesPi({ ...seed("leadership"), walls: [buildWall("direction"), buildWall("problems")] })).toBe(false);
   });
   it("describes where the PI and sprint are", () => {
     expect(periodLine(periods())).toBe("PI 26.4 · day 37 of 70 · Sprint 14 · 5 days left");

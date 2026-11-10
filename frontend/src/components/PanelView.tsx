@@ -5,6 +5,7 @@ import { effectiveKpi } from "../logic/kpi";
 import { barColor, barPill, portfolioProgress, resolveBars, valueText, type BarView, type LiveData } from "../logic/progress";
 import { PANEL_TYPES, STAGES, itemNoun } from "../logic/seed";
 import { isLate, panelStatus } from "../logic/status";
+import { signed, sparkPath, trendTitle } from "../logic/trend";
 import { clamp, fmtDate, fmtNum } from "../logic/util";
 import { store } from "../store";
 import type {
@@ -21,6 +22,7 @@ import type {
   Wall,
 } from "../types";
 import { findPanel, useUi } from "../ui";
+import { BurnupBody } from "./BurnupChart";
 
 const HEALTH: Record<"on" | "risk" | "off", [string, Status]> = {
   on: ["On track", "good"],
@@ -169,7 +171,30 @@ function PortfolioBody({ panel, live }: BodyProps<PortfolioPanel>) {
 
 /* ---------- Progress bars ---------- */
 
-function ProgressRow({ bar, panel, showKeys }: { bar: BarView; panel: ProgressPanel; showKeys: boolean }) {
+const SPARK_W = 56, SPARK_H = 18;
+
+/** How the bar has moved: a small line of percent done over the last month, and the change over the last week. */
+function BarTrendCell({ bar }: { bar: BarView }) {
+  const t = bar.trend;
+  if (!t) return <div className="pbar-trend" />;
+  const line = sparkPath(t.points, SPARK_W, SPARK_H);
+  const end = line.split(" ").pop()?.split(",");
+  return (
+    <div className="pbar-trend" title={trendTitle(t, bar.unit)} style={{ "--bc": barColor(bar) } as CSSProperties}>
+      {line && end ? (
+        <svg className="pbar-spark" viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} width={SPARK_W} height={SPARK_H} aria-hidden="true">
+          <polyline points={line} />
+          <circle cx={end[0]} cy={end[1]} r="2.5" />
+        </svg>
+      ) : null}
+      <span aria-label={trendTitle(t, bar.unit)}>
+        <b>{signed(t.delta)}</b> in {t.days}d
+      </span>
+    </div>
+  );
+}
+
+function ProgressRow({ bar, panel, showKeys, showTrend }: { bar: BarView; panel: ProgressPanel; showKeys: boolean; showTrend: boolean }) {
   const ui = useUi();
   const pill = barPill(bar);
   const sub = [bar.owner, bar.note, bar.unestimated > 0 ? `${bar.unestimated} unestimated` : ""].filter(Boolean).join(" · ");
@@ -205,6 +230,7 @@ function ProgressRow({ bar, panel, showKeys }: { bar: BarView; panel: ProgressPa
               <div className="pbar-pace" style={{ left: `${clamp(bar.expected, 0, 100)}%` }} title={`Expected by today: ${Math.round(bar.expected)}%`} />
             ) : null}
           </div>
+          {showTrend ? <BarTrendCell bar={bar} /> : null}
           <div className="pbar-val">
             <span>{valueText(bar)}</span>
             {pill ? <span className={`pill st-${pill.status}`}>{pill.text}</span> : null}
@@ -220,11 +246,13 @@ function ProgressBody({ panel, live, tv }: BodyProps<ProgressPanel>) {
   if (!bars.length && !autoNote) {
     return <p className="empty">No bars yet. Add one and link it to a Jira epic or initiative, or fill the panel from a Jira query in the panel settings.</p>;
   }
+  // The trend column only takes up room once at least one bar has a day to compare with.
+  const showTrend = panel.data.showTrend && bars.some((b) => b.trend);
   return (
     <>
-      <div className="pbars">
+      <div className={`pbars${showTrend ? " with-trend" : ""}`}>
         {bars.map((b) => (
-          <ProgressRow key={b.id} bar={b} panel={panel} showKeys={panel.data.showKeys} />
+          <ProgressRow key={b.id} bar={b} panel={panel} showKeys={panel.data.showKeys} showTrend={showTrend} />
         ))}
       </div>
       {autoNote && !(tv && !autoFailed && bars.length > 0) ? <p className={`pbar-note${autoFailed ? " is-error" : ""}`}>{autoNote}</p> : null}
@@ -471,6 +499,8 @@ function Body({ panel, live, tv }: BodyProps<Panel>) {
       return <PortfolioBody panel={panel} live={live} tv={tv} />;
     case "progress":
       return <ProgressBody panel={panel} live={live} tv={tv} />;
+    case "burnup":
+      return <BurnupBody panel={panel} live={live} tv={tv} />;
     case "problems":
       return <ProblemsBody panel={panel} live={live} tv={tv} />;
     case "actions":

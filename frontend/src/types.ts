@@ -35,11 +35,14 @@ export interface IssueSource extends JiraSourceOptions {
   key: string;
 }
 
-/** A JQL query. Progress = the matching issues themselves (no descent).
-    May use {PI}, {NEXT_PI}, {PREV_PI} and {PI_FIELD}. */
+/** A JQL query. Progress = the matching issues themselves, or with `descend` the work under
+    each of them. May use {PI}, {NEXT_PI}, {PREV_PI} and {PI_FIELD}. */
 export interface JqlSource extends JiraSourceOptions {
   kind: "jql";
   jql: string;
+  /** Measure what sits under each match (the stories under the epics it finds), the way an
+      IssueSource does, instead of the matches themselves. Work reached twice counts once. */
+  descend: boolean;
 }
 
 export type JiraSource = IssueSource | JqlSource;
@@ -59,6 +62,9 @@ export type Pace =
   | { kind: "sprint" }
   | { kind: "pi" }
   | { kind: "dates"; start: string; end: string };
+
+/** The dates a burn-up chart covers. Sprint and PI dates come from the server. */
+export type BurnPeriod = Exclude<Pace, { kind: "none" }>;
 
 export type BarColor = "status" | "accent" | "good" | "warn" | "bad" | "neutral";
 export type ValueFormat = "percent" | "fraction" | "both";
@@ -248,6 +254,17 @@ export interface ProgressPanel extends PanelBase {
     sort: ProgressSort;
     /** Show the Jira key next to each bar. */
     showKeys: boolean;
+    /** Show how each Jira-linked bar has moved: a small line and the change over the last week. */
+    showTrend: boolean;
+  };
+}
+/** Done against scope, day by day, over a PI, a sprint or chosen dates. */
+export interface BurnupPanel extends PanelBase {
+  type: "burnup";
+  data: {
+    /** The work the chart follows. Null until it is linked. */
+    source: JiraSource | null;
+    period: BurnPeriod;
   };
 }
 
@@ -258,7 +275,8 @@ export type Panel =
   | ProblemsPanel
   | ActionsPanel
   | KanbanPanel
-  | ProgressPanel;
+  | ProgressPanel
+  | BurnupPanel;
 export type PanelType = Panel["type"];
 
 export interface Wall {
@@ -311,7 +329,8 @@ export interface ProgressResult {
   /** Counted items with no estimate (points measure only). */
   unestimated: number;
   byStatus: Record<string, number>;
-  /** One snapshot per day, oldest first. */
+  /** One point per day, oldest first: the last 60 days for a bar, 180 for a burn-up chart.
+      Days from before a burn-up chart was linked are replayed from Jira's issue histories. */
   history: HistoryPoint[];
   fetchedAt: string;
 }
@@ -445,6 +464,8 @@ export interface ServerState {
   boards: Record<string, BoardResult>;
   /** Keyed by KpiItem.id, for KPIs with a metric. Missing = not fetched yet. */
   metrics: Record<string, MetricResult>;
+  /** Keyed by BurnupPanel.id, for charts with a source. Missing = not fetched yet. Absent on an older server. */
+  burnups: Record<string, ProgressResult>;
   periods: Periods;
   sync: SyncInfo;
   /** Absent on an older server: treat as unlocked. */
