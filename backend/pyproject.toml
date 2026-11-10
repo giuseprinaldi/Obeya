@@ -1,0 +1,13 @@
+[project]
+name = "obeya-backend"
+version = "0.1.0"
+description = "Obeya room API and Jira sync. Standard library only; Postgres is an optional extra."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+# Only needed when DATABASE_URL points at Postgres.
+postgres = ["psycopg[binary]>=3.2"]
+
+[tool.uv]
+package = false

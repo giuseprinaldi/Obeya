@@ -1,12 +1,18 @@
 # Jira integration: requirements and discovery
 
-The Jira pull runs on the VM backend, not in the browser. A Python service polls Jira every few minutes, works out board state and KPIs, and writes the results to Postgres. The TVs read only from Postgres.
+The Jira pull runs on the VM backend, not in the browser. A Python service polls Jira every few minutes, works out the numbers, and writes the results to the database. The TVs read only from the database.
+
+## Status
+
+Built: Jira-linked progress bars (issue, query and auto-fill links), the sync job, the PI calendar and the Jira settings screen. See `architecture.md` for how it works and what is still untested against real Jira.
+
+Not built: flow boards and flow KPIs from Jira. Items 4, 6 and 7 below are only needed for those.
 
 Design constraints:
 
-- Standard library plus one Postgres driver. No Jira SDK, to keep the dependency tree small for security review.
+- Standard library only (plus one Postgres driver if Postgres is used). No Jira SDK, to keep the dependency tree small for security review.
 - Read-only API access.
-- Board mappings, field IDs and KPI rules live in a config file, not in code.
+- Links, field IDs and the PI calendar are set in the app and stored in the database, not in code. This replaces the config file planned originally, so that changing them does not need a deploy.
 
 ## Information needed before building
 
@@ -37,10 +43,18 @@ curl -H "Authorization: Bearer $TOKEN" "$JIRA/rest/api/2/search?jql=project=KEY&
 
 These answer items 1, 4 and 5, show the real data shapes, and confirm that the VM can reach Jira.
 
-## Planned deliverables
+For progress bars, the field IDs in item 5 no longer need looking up by hand: the server finds Epic Link, Parent Link and Story Points from `/rest/api/2/field`, and the PI field is picked from a list in Jira settings.
 
-- `jira_sync/` Python module: API client, polling job, and mappers from Jira issues to panel data
-- `config/boards.yaml`, or JSON to avoid a YAML dependency: board-to-wall mapping, field IDs and status mapping
-- KPI calculations as pure functions, with unit tests built from recorded sample responses
-- Postgres tables for synced issues, KPI snapshots (the history behind the sparklines) and sync runs
-- A spec in the same format as the proposal pipeline spec, for Devin to wire into the VM build
+## Deliverables
+
+Done:
+
+- `backend/obeya/`: Jira client, sync job, progress calculation as pure functions, HTTP API
+- `backend/fake_jira/`: a stand-in Jira for development and tests
+- Tables for the room, settings, link results, daily history and sync runs (SQLite by default, Postgres optional)
+- `docs/architecture.md`: API, data model, configuration and deployment notes for the VM build
+
+Still to do:
+
+- Flow boards and flow KPIs from Jira: status-to-column mapping, "blocked" rule, cycle and lead time from the change history
+- KPI snapshots feeding the KPI sparklines

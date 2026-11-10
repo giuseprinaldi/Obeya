@@ -1,0 +1,143 @@
+/* Status rules: what counts as off target, late, blocked or behind, and how that rolls up. */
+import type { ActionItem, KpiItem, Panel, Status } from "../types";
+import { resolveBars, type LiveData } from "./progress";
+
+export function kpiStatus(k: KpiItem): Status {
+  const a = Number(k.actual), t = Number(k.target);
+  if (k.actual === "" || k.actual == null || k.target === "" || k.target == null || !isFinite(a) || !isFinite(t)) return "none";
+  if (k.dir === "down") {
+    if (a <= t) return "good";
+    return (t === 0 ? a <= 1 : a <= t * 1.1) ? "warn" : "bad";
+  }
+  if (a >= t) return "good";
+  return a >= t * 0.9 ? "warn" : "bad";
+}
+
+export const isLate = (a: ActionItem, today: string): boolean => !a.done && !!a.due && a.due < today;
+
+export interface Signals {
+  kpiBad: number;
+  kpiWarn: number;
+  blocked: number;
+  overWip: number;
+  late: number;
+  openHigh: number;
+  open: number;
+  off: number;
+  risk: number;
+  /** Progress bars behind pace. */
+  barBad: number;
+  /** Progress bars at risk of falling behind. */
+  barWarn: number;
+  /** Jira links that failed. */
+  barError: number;
+  items: number;
+}
+
+export function signals(panels: Panel[], live: LiveData): Signals {
+  const s: Signals = { kpiBad: 0, kpiWarn: 0, blocked: 0, overWip: 0, late: 0, openHigh: 0, open: 0, off: 0, risk: 0, barBad: 0, barWarn: 0, barError: 0, items: 0 };
+  const today = live.periods.today;
+  for (const p of panels) {
+    switch (p.type) {
+      case "kpi":
+        for (const k of p.data.items) {
+          s.items++;
+          const st = kpiStatus(k);
+          if (st === "bad") s.kpiBad++;
+          else if (st === "warn") s.kpiWarn++;
+        }
+        break;
+      case "kanban": {
+        const cols = p.data.columns;
+        const last = cols.length ? cols[cols.length - 1]!.id : null;
+        for (const c of p.data.cards) {
+          s.items++;
+          if (c.blocked && c.col !== last) s.blocked++;
+        }
+        for (const c of cols) {
+          if (Number(c.wip) > 0 && p.data.cards.filter((x) => x.col === c.id).length > Number(c.wip)) s.overWip++;
+        }
+        break;
+      }
+      case "actions":
+        for (const a of p.data.items) {
+          s.items++;
+          if (isLate(a, today)) s.late++;
+        }
+        break;
+      case "problems":
+        for (const x of p.data.items) {
+          s.items++;
+          if (x.stage !== "Closed") {
+            s.open++;
+            if (x.severity === "High") s.openHigh++;
+          }
+        }
+        break;
+      case "portfolio":
+        for (const x of p.data.items) {
+          s.items++;
+          if (x.health === "off") s.off++;
+          else if (x.health === "risk") s.risk++;
+        }
+        break;
+      case "progress": {
+        const r = resolveBars(p, live);
+        if (r.autoFailed) s.barError++;
+        for (const b of r.bars) {
+          if (b.state === "error") s.barError++;
+          if (b.state !== "ok") continue;
+          s.items++;
+          if (b.status === "bad") s.barBad++;
+          else if (b.status === "warn") s.barWarn++;
+        }
+        break;
+      }
+      case "statement":
+        break;
+    }
+  }
+  return s;
+}
+
+/** Things that need attention now: these raise the red flag on a wall's tab. */
+export const badCount = (s: Signals): number => s.kpiBad + s.blocked + s.late + s.openHigh + s.off + s.barBad;
+
+/** Things to watch on a wall's screen in the room plan. */
+export const watchCount = (s: Signals): number => s.kpiWarn + s.risk + s.overWip + s.barWarn + s.barError;
+
+export function panelStatus(p: Panel, live: LiveData): Status {
+  if (p.type === "statement") return "none";
+  const s = signals([p], live);
+  if (badCount(s)) return "bad";
+  if (watchCount(s) + s.open) return "warn";
+  return s.items ? "good" : "none";
+}
+
+export function wallStatus(s: Signals): Status {
+  return badCount(s) ? "bad" : watchCount(s) ? "warn" : "good";
+}
+
+export interface Chip {
+  text: string;
+  status: Status;
+}
+
+export function chipList(s: Signals): Chip[] {
+  const out: Chip[] = [];
+  const add = (n: number, label: string, status: Status): void => {
+    if (n) out.push({ text: `${n} ${label}`, status });
+  };
+  add(s.kpiBad, s.kpiBad > 1 ? "KPIs off target" : "KPI off target", "bad");
+  add(s.off, "off track", "bad");
+  add(s.blocked, "blocked", "bad");
+  add(s.late, "late", "bad");
+  add(s.openHigh, "high severity", "bad");
+  add(s.barBad, "behind pace", "bad");
+  add(s.kpiWarn, "near target", "warn");
+  add(s.risk + s.barWarn, "at risk", "warn");
+  add(s.overWip, "over WIP", "warn");
+  add(s.barError, s.barError > 1 ? "Jira links failing" : "Jira link failing", "warn");
+  if (!out.length) out.push({ text: "All clear", status: "good" });
+  return out;
+}
