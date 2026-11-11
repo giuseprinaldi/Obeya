@@ -16,8 +16,8 @@ from .config import Config
 from .db import HISTORY_DAYS, Database
 from .jira_client import JiraClient, JiraError, JiraUnavailable
 from .periods import TemplateError, clean_calendar, period_range, pick_pis, sprint_period
-from .sources import (Engine, SourceError, is_lookback, normalize_auto, normalize_board, normalize_metric,
-                      normalize_source, spec_id)
+from .sources import (Engine, SourceError, is_lookback, normalize_auto, normalize_board, normalize_deps,
+                      normalize_metric, normalize_source, spec_id)
 
 log = logging.getLogger("obeya.sync")
 WORKERS = 4
@@ -36,6 +36,7 @@ class Links:
     metrics: dict[str, str] = field(default_factory=dict)    # KPI item id -> sid
     burnups: dict[str, str] = field(default_factory=dict)    # burn-up panel id -> sid
     burn_periods: dict[str, Any] = field(default_factory=dict)   # burn-up panel id -> its period setting
+    deps: dict[str, str] = field(default_factory=dict)       # dependencies panel id -> sid
 
     def add(self, owners: dict[str, str], owner_id: Any, spec: Optional[dict]) -> None:
         if spec and owner_id:
@@ -67,6 +68,8 @@ def collect_links(room: Any) -> Links:
             if kind == "kpi":
                 for item in items:
                     links.add(links.metrics, item.get("id"), normalize_metric(item.get("metric")))
+            if kind == "dependencies":
+                links.add(links.deps, panel.get("id"), normalize_deps(data.get("source")))
             if kind == "burnup":
                 links.add(links.burnups, panel.get("id"), normalize_source(data.get("source")))
                 if str(panel.get("id") or "") in links.burnups:
@@ -286,7 +289,7 @@ class Syncer:
 
     def results_for(self, room: Any) -> dict[str, dict[str, dict]]:
         """Map cached results onto the items and panels that own the links.
-        Returns {"progress", "auto", "boards", "metrics", "burnups"}, each keyed by owner id."""
+        Returns {"progress", "auto", "boards", "metrics", "burnups", "deps"}, each keyed by owner id."""
         links = collect_links(room)
         cache = self.db.cached_results(list(links.specs))
         snapshot_metrics = {sid for sid in set(links.metrics.values())
@@ -320,7 +323,9 @@ class Syncer:
             if sid in snapshot_metrics:
                 result = {**result, "history": [{"d": h["d"], "value": h["done"]} for h in history.get(sid, [])]}
             metrics[item_id] = result
-        return {"progress": progress, "auto": auto, "boards": boards, "metrics": metrics, "burnups": burnups}
+        deps = {panel_id: cache[sid] for panel_id, sid in links.deps.items() if sid in cache}
+        return {"progress": progress, "auto": auto, "boards": boards, "metrics": metrics, "burnups": burnups,
+                "deps": deps}
 
 
 def _fresh(result: Optional[dict]) -> bool:

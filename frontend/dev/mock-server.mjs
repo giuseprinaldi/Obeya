@@ -8,6 +8,7 @@
 // Invented on purpose, so every state can be seen: board 1 has a blocked card, a column over its WIP limit and a
 // column with "+N more"; a cycle_time KPI has nothing to measure; an unplanned KPI fails; board 404 fails.
 // Bars and burn-up charts come with an invented history; a key ending in -404 fails for either.
+// Board 1 also has two stale cards: in progress and not updated for longer than the default 7 days.
 import { createServer } from "node:http";
 
 const args = process.argv.slice(2);
@@ -77,7 +78,7 @@ function card(n, over = {}) {
   return {
     key, title: settings.jira.showSummaries ? WORK[n % WORK.length] : key, url: `https://jira.example/browse/${key}`, type: n % 5 === 0 ? "Bug" : "Story",
     assignee: settings.jira.showAssignees ? PEOPLE[n % PEOPLE.length] : "", status: "", points: n % 4 === 3 ? null : [1, 2, 3, 5, 8][n % 5],
-    blocked: false, blockedReason: "", ageDays: n % 7, ...over,
+    blocked: false, blockedReason: "", ageDays: n % 7, category: "new", idleDays: n % 4, ...over,
   };
 }
 
@@ -90,9 +91,10 @@ function forBoard(b) {
   const all = [
     { name: "Backlog", wip: 0, total: 22, cards: cards(0, 12) },
     { name: "To do", wip: 0, total: 4, cards: cards(20, 4) },
-    { name: "In progress", wip: 3, total: 5, cards: cards(30, 5, (i) => (i === 1 ? { blocked: true, blockedReason: "Flagged", ageDays: 9 } : i === 3 ? { blocked: true, blockedReason: "Blocked by PLAT-9", ageDays: 4 } : {})) },
-    { name: "Review", wip: 2, total: 2, cards: cards(40, 2, () => ({ ageDays: null })) },
-    { name: "Done", wip: 0, total: b.doneDays ? 14 : 40, cards: cards(50, 12) },
+    // Two in-progress cards have gone quiet (9 and 12 days without an update), so the stale flag shows at the default of 7.
+    { name: "In progress", wip: 3, total: 5, cards: cards(30, 5, (i) => ({ category: "indeterminate", idleDays: [1, 9, 0, 3, 12][i], ...(i === 1 ? { blocked: true, blockedReason: "Flagged", ageDays: 9 } : i === 3 ? { blocked: true, blockedReason: "Blocked by PLAT-9", ageDays: 4 } : {}) })) },
+    { name: "Review", wip: 2, total: 2, cards: cards(40, 2, () => ({ ageDays: null, category: "indeterminate", idleDays: null })) },
+    { name: "Done", wip: 0, total: b.doneDays ? 14 : 40, cards: cards(50, 12, () => ({ category: "done" })) },
   ];
   const hidden = new Set(b.hiddenColumns.map((n) => n.toLowerCase()));
   const columns = all.filter((c) => !hidden.has(c.name.toLowerCase()));
@@ -113,12 +115,30 @@ function forMetric(m) {
   return { ok: true, value: series.at(-1), unit, n: 23, detail, history: series.map((value, i) => ({ d: day((i - series.length + 1) * 7), value })), fetchedAt };
 }
 
+// Invented dependencies, one of each kind: work under way that is held up, across teams and within one;
+// one that has not started; and one that is settled.
+function forDeps(d) {
+  const fetchedAt = new Date().toISOString();
+  if (/syntax error/i.test(d.jql)) return { ok: false, error: "Jira rejected the query: syntax error.", deps: [], total: 0, scope: 0, fetchedAt };
+  const end = (key, n, status, category) => ({ key, title: settings.jira.showSummaries ? WORK[n % WORK.length] : key, url: `https://jira.example/browse/${key}`, status, category, project: key.split("-")[0] });
+  const all = [
+    { waiting: end("PLAT-131", 2, "In Progress", "indeterminate"), on: end("DATA-17", 4, "To Do", "new"), type: "Blocks" },
+    { waiting: end("PLAT-133", 3, "In Review", "indeterminate"), on: end("PLAT-120", 6, "In Progress", "indeterminate"), type: "Blocks" },
+    { waiting: end("DATA-22", 8, "To Do", "new"), on: end("PLAT-125", 9, "In Progress", "indeterminate"), type: "Dependency" },
+    { waiting: end("PLAT-140", 10, "To Do", "new"), on: end("DATA-9", 11, "Done", "done"), type: "Dependency" },
+  ];
+  const wanted = new Set((d.linkTypes ?? []).map((n) => n.toLowerCase()));
+  const deps = wanted.size ? all.filter((x) => wanted.has(x.type.toLowerCase())) : all;
+  return { ok: true, deps, total: deps.length, scope: 37, fetchedAt };
+}
+
 function state() {
-  const progress = {}, auto = {}, boards = {}, metrics = {}, burnups = {};
+  const progress = {}, auto = {}, boards = {}, metrics = {}, burnups = {}, deps = {};
   for (const w of room?.walls ?? []) {
     for (const p of w.panels) {
       if (p.type === "portfolio") for (const it of p.data.items) if (it.source) progress[it.id] = forSource(it.source);
       if (p.type === "burnup" && p.data.source) burnups[p.id] = withHistory(forSource(p.data.source), 120);
+      if (p.type === "dependencies" && p.data.source) deps[p.id] = forDeps(p.data.source);
       if (p.type === "kpi") for (const it of p.data.items) if (it.metric) metrics[it.id] = forMetric(it.metric);
       if (p.type === "kanban" && p.data.jira) boards[p.id] = forBoard(p.data.jira);
       if (p.type === "progress") {
@@ -134,10 +154,34 @@ function state() {
   const pis = settings.pis.slice().sort((a, b) => a.start.localeCompare(b.start));
   const pi = pis.find((p) => p.start <= today && today <= p.end) ?? pis.filter((p) => p.start <= today).pop() ?? null;
   return {
-    room, version, updatedAt, progress, auto, boards, metrics, burnups,
+    room, version, updatedAt, progress, auto, boards, metrics, burnups, deps,
     periods: { today, pi, nextPi: pi ? (pis.find((p) => p.start > pi.end) ?? null) : null, sprint: settings.jira.boardId ? { name: "Sprint 14", start: day(-8), end: day(5) } : null },
     sync: { jiraConfigured: true, running: false, lastRunAt: new Date().toISOString(), lastOk: true, lastError: null, intervalSeconds: 300 },
   };
+}
+
+// Earlier versions, newest first, and a rough account of what each save changed (the real server says more).
+const past = [];
+function whatChanged(before, after, v) {
+  if (!before) return [v === 1 ? "Room created" : "The oldest version kept"];
+  const lines = [];
+  if (["roomName", "theme", "tvTheme", "accent", "density", "rotate"].some((k) => before[k] !== after[k])) lines.push("Room settings changed");
+  const old = new Map((before.walls ?? []).map((w) => [w.id, w]));
+  for (const w of after.walls ?? []) {
+    const was = old.get(w.id);
+    if (!was) { lines.push(`Added wall ${w.name}`); continue; }
+    old.delete(w.id);
+    const panels = new Map(was.panels.map((p) => [p.id, p]));
+    for (const p of w.panels) {
+      const prev = panels.get(p.id);
+      if (!prev) lines.push(`Added panel ${p.title} to ${w.name}`);
+      else if (JSON.stringify(prev) !== JSON.stringify(p)) lines.push(`Changed ${p.title} on ${w.name}`);
+      panels.delete(p.id);
+    }
+    for (const p of panels.values()) lines.push(`Removed panel ${p.title} from ${w.name}`);
+  }
+  for (const w of old.values()) lines.push(`Removed wall ${w.name}`);
+  return lines.length ? lines : ["Small changes"];
 }
 
 const sessionOf = (req) => (req.headers.cookie ?? "").split(/;\s*/).map((c) => c.split("=")).find(([k]) => k === COOKIE)?.[1] ?? "";
@@ -205,7 +249,24 @@ createServer(async (req, res) => {
         const body = await read(req);
         if (body.baseVersion !== version) return send(409, { error: "conflict", version, room });
         room = body.room; version++; updatedAt = new Date().toISOString();
+        past.unshift({ version, savedAt: updatedAt, room });
+        past.length = Math.min(past.length, 100);
         return send(200, { version, updatedAt });
+      }
+      case "GET /api/room/history": {
+        const wanted = new URL(req.url, "http://mock").searchParams.get("version");
+        if (wanted !== null && wanted !== "") {
+          if (!/^\d{1,9}$/.test(wanted)) return send(400, { error: "version must be a whole number." });
+          const hit = past.find((p) => p.version === Number(wanted));
+          return hit ? send(200, hit) : send(404, { error: `Version ${Number(wanted)} is not kept any more. The server keeps the last 100.` });
+        }
+        return send(200, {
+          current: version,
+          versions: past.map((p, i) => {
+            const lines = whatChanged(past[i + 1]?.room, p.room, p.version);
+            return { version: p.version, savedAt: p.savedAt, roomName: p.room?.roomName ?? "", walls: p.room?.walls?.length ?? 0, panels: (p.room?.walls ?? []).reduce((n, w) => n + w.panels.length, 0), changes: lines.slice(0, 5), more: Math.max(0, lines.length - 5) };
+          }),
+        });
       }
       case "GET /api/settings": return send(200, settings);
       case "PUT /api/settings": settings = await read(req); return send(200, settings);
@@ -218,7 +279,7 @@ createServer(async (req, res) => {
       case "GET /api/jira/pi-values": return send(200, ["PI 26.3", "PI 26.4", "PI 26.5"]);
       case "POST /api/jira/preview": {
         const body = await read(req);
-        return send(200, body.board ? forBoard(body.board) : body.metric ? forMetric(body.metric) : body.auto ? forAuto(body.auto) : forSource(body.source));
+        return send(200, body.deps ? forDeps(body.deps) : body.board ? forBoard(body.board) : body.metric ? forMetric(body.metric) : body.auto ? forAuto(body.auto) : forSource(body.source));
       }
       case "POST /api/sync": return send(200, { ok: true, error: null, sources: 9, durationMs: 840 });
       default: return send(404, { error: "Not found" });

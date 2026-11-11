@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlsplit
 
-from .data import PI_FIELD, STATUSES, STORY_POINTS, Dataset, FIELDS, status_json
+from .data import LINK_TYPES, PI_FIELD, STATUSES, STORY_POINTS, Dataset, FIELDS, status_json
 from .jql import JqlError, search
 
 DEFAULT_TOKEN = "fake-token"
@@ -65,6 +65,8 @@ def make_fake_server(host: str = "127.0.0.1", port: int = 8790, token: str = DEF
                 self._send(200, [f for f in FIELDS if f["id"] not in hidden])
             elif method == "GET" and path == "/rest/api/2/status":
                 self._send(200, [status_json(name) for name in STATUSES])
+            elif method == "GET" and path == "/rest/api/2/issueLinkType":
+                self._send(200, {"issueLinkTypes": LINK_TYPES})
             elif path == "/rest/api/2/search":
                 self._search({**query, **body} if method == "POST" else query)
             elif method == "GET" and (m := re.fullmatch(r"/rest/agile/1\.0/board/(\d+)/configuration", path)):

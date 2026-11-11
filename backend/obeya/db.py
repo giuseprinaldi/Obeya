@@ -176,6 +176,20 @@ class Database:
             conn.execute("DELETE FROM room_history WHERE version <= ?", (version - ROOM_HISTORY_KEEP,))
         return {"version": version, "updated_at": self._ts(now)}
 
+    def room_versions(self) -> list[dict]:
+        """Every kept version of the room, newest first: {version, doc, saved_at}."""
+        with self.connect(write=False) as conn:
+            rows = conn.execute("SELECT version, doc, saved_at FROM room_history ORDER BY version DESC").fetchall()
+        return [{"version": r["version"], "doc": self._load(r["doc"]), "saved_at": self._ts(r["saved_at"])} for r in rows]
+
+    def room_version(self, version: int) -> Optional[dict]:
+        """One kept version, or None when it was never saved or is no longer kept."""
+        with self.connect(write=False) as conn:
+            row = conn.execute("SELECT version, doc, saved_at FROM room_history WHERE version = ?", (version,)).fetchone()
+        if not row:
+            return None
+        return {"version": row["version"], "doc": self._load(row["doc"]), "saved_at": self._ts(row["saved_at"])}
+
     # ---- settings ----
 
     def get_settings(self) -> dict:

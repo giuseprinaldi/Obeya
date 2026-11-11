@@ -7,7 +7,7 @@ import { normalizeRoom } from "./logic/normalize";
 import type { LiveData } from "./logic/progress";
 import { seed } from "./logic/seed";
 import { todayISO } from "./logic/util";
-import type { Access, AutoResult, BoardResult, MetricResult, Periods, ProgressResult, Room, ServerState, SyncInfo } from "./types";
+import type { Access, AutoResult, BoardResult, DepsResult,MetricResult, Periods, ProgressResult, Room, ServerState, SyncInfo } from "./types";
 
 export interface StoreState {
   /** False until the first answer from the server. */
@@ -22,6 +22,7 @@ export interface StoreState {
   boards: Record<string, BoardResult>;
   metrics: Record<string, MetricResult>;
   burnups: Record<string, ProgressResult>;
+  deps: Record<string, DepsResult>;
   periods: Periods;
   sync: SyncInfo;
   /** Whether this browser may edit. View-only browsers never save, seed or open editors. */
@@ -44,6 +45,7 @@ let state: StoreState = {
   boards: {},
   metrics: {},
   burnups: {},
+  deps: {},
   periods: { today: todayISO(), pi: null, nextPi: null, sprint: null },
   sync: { jiraConfigured: false, running: false, lastRunAt: null, lastOk: null, lastError: null, intervalSeconds: 300 },
   access: OPEN_ACCESS,
@@ -91,6 +93,7 @@ function applyServer(s: ServerState, seqAtStart: number, force: boolean): void {
     boards: s.boards ?? {},
     metrics: s.metrics ?? {},
     burnups: s.burnups ?? {},
+    deps: s.deps ?? {},
     periods: s.periods ?? state.periods,
     sync: s.sync ?? state.sync,
     // An older server sends no access: the room is open.
@@ -315,5 +318,5 @@ export function useStore(): StoreState {
 
 /** The live Jira data in the shape the status and progress rules take. */
 export function liveOf(s: StoreState): LiveData {
-  return { progress: s.progress, auto: s.auto, boards: s.boards, metrics: s.metrics, burnups: s.burnups, periods: s.periods, jiraConfigured: s.sync.jiraConfigured };
+  return { progress: s.progress, auto: s.auto, boards: s.boards, metrics: s.metrics, burnups: s.burnups, deps: s.deps, periods: s.periods, jiraConfigured: s.sync.jiraConfigured };
 }

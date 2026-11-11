@@ -49,6 +49,27 @@ The replay is an approximation, and the panel settings say so:
 
 Days are cut at midnight in the server's own time zone, the same clock that decides which day a snapshot belongs to. For a query that uses `{PI}`, the chart starts again by itself when the PI rolls over, because the period and the query both follow the calendar.
 
+## Stale items
+
+Work that is under way but has gone quiet is flagged, on cards and on bars. Both thresholds are set in the panel settings and saved in the room; 0 switches a flag off.
+
+- **Cards on a Jira flow board.** A card is stale when its status is in Jira's "In Progress" category and nobody has updated the issue for the board's threshold or longer (7 days by default, at most 90). "Updated" is Jira's own `updated` field, so a comment or an edit counts as a sign of life, not only a status change. Cards in the board's last column are never stale. The server sends each card's status category and the whole days since the update; the threshold is applied in the browser, so changing it needs no new Jira call. The count covers the cards the server sends (at most 30 a column), including those past the cards-per-column setting.
+- **Progress bars.** A Jira-linked bar is stale when it has started (something is done or in progress), is not finished, and its done amount has not gone up for the panel's threshold or longer (14 days by default, at most 60, which is how much history a bar carries). This is read from the bar's daily snapshots, so a bar is not flagged until it has that many days of history, and a day the server missed is not taken as progress. A bar shows "No progress 16d" unless it already says Behind or At risk.
+
+Stale items count as something to watch: they turn the panel's stripe amber and add an "N stale" chip to the wall. Manual boards and manual bars carry no dates and are never stale.
+
+## Dependencies and risks
+
+**Dependencies panel.** The panel holds a query and, optionally, the names of the link types to read. The sync runs the query (asking only for summary, status, type and `issuelinks`) and turns the links into dependencies; nothing is stored beyond the cached result.
+
+- Jira describes a link from each end in words, and which end is "inward" differs between link types ("Blocks" puts the blocker inward, a typical "Dependency" type puts the issue depended on outward). So the direction is taken from the wording: "is blocked by", "depends on", "requires", "is preceded by" and similar mean this issue waits on the other; "blocks", "is depended on by", "is required by", "precedes" mean the reverse. Links worded otherwise ("relates to", "duplicates") are ignored.
+- When link types are named in the panel settings, only those are read, and a named type whose wording says nothing is read the way "Blocks" is: the inward issue is the one being waited on.
+- A dependency is listed once although Jira shows it on both issues, and it shows when only one of its two issues matches the query. The other end comes from the link itself, with its key, summary and status.
+- Screens get at most 200, ordered by what needs attention: work under way that waits on something unfinished, then other open dependencies, then settled ones; across projects before within one. "Across teams" means the two issue keys have different project prefixes.
+- A wall is red while any in-progress work waits on an unfinished dependency. Dependencies that are merely open raise nothing.
+
+**Risks panel.** Entered by hand and stored in the room document, like problems and actions. Each risk has an owner, an impact and a ROAM state. Open and owned risks count as live and keep the panel amber; a high-impact risk still open (no owner) makes it red.
+
 ## How Jira flow boards work
 
 A flow board panel can be switched from manual cards to a Jira board. Nothing is mapped by hand:
@@ -99,6 +120,15 @@ How it is built:
 - Wrong guesses are limited to 8 in 5 minutes across all browsers.
 - Every PUT and POST must be JSON. Together with the cookie settings, that stops another website from acting through an unlocked browser.
 
+## Restoring an earlier version
+
+Every accepted save writes the whole room document to `room_history`, and the last 100 are kept. **Customize** > **Earlier versions** lists them, newest first, with when each was saved and what it changed, and puts a Restore button on every version except the live one.
+
+- **What changed** is worked out on the server by comparing each version with the one before it (`backend/obeya/history.py`): walls added, removed, renamed or reordered, panels added, removed, changed or reordered, and room settings. At most five lines are sent per version, with a count of the rest. For the oldest version still kept, the one before it is gone, so the list only says it is the oldest.
+- **Restoring** reads that version from the server and saves it as an ordinary edit. It therefore becomes the newest version, goes through the same "someone else saved first" check as any edit, and can be undone by restoring the version it replaced.
+- **Who can use it.** Reading the history needs edit rights, like everything except reading the room, so a locked-out browser gets 401.
+- **Limits.** There is no record of who made a change, and Jira settings, the PI calendar and the passcode are not part of the room, so they are not versioned. Once 100 newer saves exist, a version is gone; keep a JSON backup from Customize for anything that must outlive that.
+
 ## Screen addresses
 
 A TV opens `/#screen-N`. It shows whichever wall is at position N and follows it when walls are reordered, replaced or loaded from a template, so nobody has to touch the TV. `/#tv-<wall-id>` still pins one specific wall.
@@ -122,6 +152,7 @@ A TV opens `/#screen-N`. It shows whichever wall is at position N and follows it
 | Status categories | Needed to tell when work started and finished. |
 | Issue histories | Searches return complete histories, which the look-back metrics and the earlier days of burn-up charts need. |
 | Days in status on cards | Whether this Jira reports it. |
+| Dependency links | Which issue link types this Jira has, and which of them read as dependencies. |
 
 The command exits with status 1 if any check failed, so it can be used in a deployment script. It reads from Jira and writes nothing.
 
@@ -131,8 +162,9 @@ All JSON, same origin. Errors are `{"error": "..."}` with a non-2xx status. Type
 
 | Method and path | Purpose |
 |---|---|
-| `GET /api/state` | Room, version, Jira results (`progress`, `auto`, `boards`, `metrics`, `burnups`), `periods`, `sync` status, and `access` (whether this browser may edit). Bars carry the last 60 days of history, burn-up charts the last 180. Sends an ETag. |
+| `GET /api/state` | Room, version, Jira results (`progress`, `auto`, `boards`, `metrics`, `burnups`, `deps`), `periods`, `sync` status, and `access` (whether this browser may edit). Bars carry the last 60 days of history, burn-up charts the last 180. Sends an ETag. |
 | `PUT /api/room` | Body `{room, baseVersion}`. `200 {version, updatedAt}`, or `409 {error: "conflict", version, room}` if someone saved first. `baseVersion` 0 creates the room. |
+| `GET /api/room/history` | The kept versions of the room, newest first: `{current, versions: [{version, savedAt, roomName, walls, panels, changes, more}]}`. With `?version=N`, that one version as `{version, savedAt, room}`; 404 when it is no longer kept, 400 when N is not a whole number. |
 | `GET /api/settings`, `PUT /api/settings` | PI field, story points field, board, summaries and assignee names on or off, the blocked rule, PI calendar. Saving triggers a full sync. |
 | `POST /api/sync` | Run a full sync now and wait for it. |
 | `POST /api/unlock`, `POST /api/lock` | Enter the passcode for this browser (sets the session cookie), or go back to view-only. |
@@ -141,7 +173,7 @@ All JSON, same origin. Errors are `{"error": "..."}` with a non-2xx status. Type
 | `GET /api/jira/status` | Whether Jira is configured and reachable with the token. |
 | `GET /api/jira/fields`, `GET /api/jira/boards` | For the pickers in Jira settings. |
 | `GET /api/jira/pi-values` | Distinct values recently used in the PI field, as name suggestions. |
-| `POST /api/jira/preview` | Body `{source}`, `{auto}`, `{board}` or `{metric}`. Computes a link without saving it ("Check"). |
+| `POST /api/jira/preview` | Body `{source}`, `{auto}`, `{board}`, `{metric}` or `{deps}`. Computes a link without saving it ("Check"). |
 | `GET /api/health` | `{ok: true}` when the database answers. |
 
 Anything else under `/` is served from `frontend/dist`, with `index.html` as the fallback.
@@ -200,14 +232,16 @@ Environment variables, or `backend/.env` (see `backend/.env.example`):
 
 ## Tested and not tested
 
-- **Tested:** 153 backend tests (`python -m unittest discover -s tests -t .` in `backend/`), covering the PI calendar, JQL variables, progress and flow maths on hand-built histories, the Jira client, hierarchy walk, boards and metrics over real HTTP against the fake Jira, and the API against a real SQLite database. Setting `OBEYA_TEST_DATABASE_URL` to a `postgresql://` URL runs the API tests a second time on Postgres (182 tests in total). The edit lock is covered there: forged, edited and expired cookies, the guess limit, and every endpoint refusing a locked-out browser. So is the burn-up replay: that it ends on the same numbers the link shows today, runs once per link, runs again only for an earlier start, never overwrites a real snapshot, and is not retried on every sync when it fails.
-- **Frontend:** 127 unit tests on the status, pace, link-parsing, calendar, board, KPI, access, screen-address, bar-trend and burn-up logic (`npm test` in `frontend/`). The burn-up chart and the trend column were run in Chrome against this server and the fake Jira: both example charts in the editor (light and dark) and in display mode at 1920x1080, the hover read-out, adding a chart and linking it to a query, Check link, changing the period to custom dates (and being stopped when they are missing), and the two-column bar layout with the trend column on a TV. The built app was also run in Chrome against this server and the fake Jira: first-run seeding, linking a bar from a pasted Jira URL, Check link (good and bad keys), auto-fill bars, adding a Jira KPI, switching a flow board between Jira boards, the "Blocked means" and assignee settings taking effect, Jira settings, display mode at 1366x768 and 1920x1080, arrow keys and Escape, and the "changed on another device" conflict path. Also run there: the edit lock (set, change and remove the passcode, lock, unlock, a wrong passcode, too many wrong guesses, view-only mode, a session ending mid-edit, and the server-side reset command against the running server); screen addresses (a TV following a reorder within its 30-second refresh, rotation without the address changing, wrap-around, and a screen with no wall); and the connection check section.
+- **Tested:** 184 backend tests (`python -m unittest discover -s tests -t .` in `backend/`), covering the PI calendar, JQL variables, progress and flow maths on hand-built histories, the Jira client, hierarchy walk, boards and metrics over real HTTP against the fake Jira, and the API against a real SQLite database. Setting `OBEYA_TEST_DATABASE_URL` to a `postgresql://` URL runs the API tests a second time on Postgres (222 tests in total). The edit lock is covered there: forged, edited and expired cookies, the guess limit, and every endpoint refusing a locked-out browser. So is the burn-up replay: that it ends on the same numbers the link shows today, runs once per link, runs again only for an earlier start, never overwrites a real snapshot, and is not retried on every sync when it fails. Also covered: the list of earlier versions and what each changed, fetching one, and a locked browser being refused; the two fields that drive stale cards; and dependencies read from "Blocks" and "Dependency" links in both directions, listed once, across projects, with named link types and with only one end in scope.
+- **Frontend:** 165 unit tests on the status, pace, link-parsing, calendar, board, KPI, access, screen-address, bar-trend, burn-up, stale-item, version-history, dependency and risk logic (`npm test` in `frontend/`). Run in Chrome against this server and the fake Jira: the Dependencies & risks wall in the editor and at 1920x1080, adding and editing a risk, the dependencies settings (Check, showing settled ones), the stale tags on cards and the two threshold fields, and Customize > Earlier versions (the list, the two-step restore, and the restore being saved as a new version). The burn-up chart and the trend column were run in Chrome against this server and the fake Jira: both example charts in the editor (light and dark) and in display mode at 1920x1080, the hover read-out, adding a chart and linking it to a query, Check link, changing the period to custom dates (and being stopped when they are missing), and the two-column bar layout with the trend column on a TV. The built app was also run in Chrome against this server and the fake Jira: first-run seeding, linking a bar from a pasted Jira URL, Check link (good and bad keys), auto-fill bars, adding a Jira KPI, switching a flow board between Jira boards, the "Blocked means" and assignee settings taking effect, Jira settings, display mode at 1366x768 and 1920x1080, arrow keys and Escape, and the "changed on another device" conflict path. Also run there: the edit lock (set, change and remove the passcode, lock, unlock, a wrong passcode, too many wrong guesses, view-only mode, a session ending mid-edit, and the server-side reset command against the running server); screen addresses (a TV following a reorder within its 30-second refresh, rotation without the address changing, wrap-around, and a screen with no wall); and the connection check section.
 - **Frontend, not tested:** Firefox and Safari (the bar layout uses CSS subgrid, `:has()` and container queries, so use a current browser on the TVs), the wall rotation timer over a long run, and the copy-to-clipboard button.
 - **Display mode has a density limit.** A wall is scaled to fit the screen, and text shrinks as a wall gets denser, down to a floor. Past that floor panels are cut off at the bottom rather than scrolled. The example Delivery wall (four panels, three KPIs, eight bars and a four-column Jira board at six cards per column) fits a 16:9 screen with a little shrinking; much more than that should be split across two walls, or the board given fewer cards per column.
 - **Not tested against real Jira.** The fake follows Data Center's documented shapes, but these need checking on the VM:
   - that the service token can read the projects and boards involved;
   - that this Jira version reports `statuscategorychangedate` (it drives the age shown on cards; without it cards simply show no age);
+  - that the `updated` field moves when you would expect it to (it drives the stale flag on cards; an automation that touches every issue nightly would keep anything from ever looking stale);
   - that the flag field is called "Flagged", which is how the server finds it;
+  - which issue link types the teams use for dependencies and how they are worded (the connection check lists them; if none reads as a dependency, name them in the dependencies panel), and that linked issues arrive with their summary and status inside the link;
   - that searches with `expand=changelog` return complete histories for long-lived issues (the look-back metrics and the replayed days of burn-up charts depend on it);
   - how long the burn-up replay takes on a real scope: it is one search with histories per chart for a query, and one per 40 issues for an issue link, run once;
   - how this instance returns the Parent Link field (the code handles a key, an id or an object, and falls back to one query per parent if it cannot read it);

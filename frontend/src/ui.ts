@@ -10,6 +10,7 @@ export type DialogSpec =
   | { kind: "wall"; wallId: string }
   | { kind: "addWall" }
   | { kind: "customize" }
+  | { kind: "history" }
   | { kind: "jira" }
   | { kind: "unlock" };
 

@@ -92,6 +92,8 @@ export interface BoardSource {
   maxCards: number;
   /** Last column: only show work finished in the last N days. 0 = no limit. */
   doneDays: number;
+  /** Flag in-progress cards nobody has updated in Jira for this many days. 0 = off. Display only. */
+  staleDays: number;
 }
 
 export type MetricKind =
@@ -256,6 +258,8 @@ export interface ProgressPanel extends PanelBase {
     showKeys: boolean;
     /** Show how each Jira-linked bar has moved: a small line and the change over the last week. */
     showTrend: boolean;
+    /** Flag started, unfinished Jira-linked bars whose done amount has not gone up for this many days. 0 = off. */
+    staleDays: number;
   };
 }
 /** Done against scope, day by day, over a PI, a sprint or chosen dates. */
@@ -268,6 +272,45 @@ export interface BurnupPanel extends PanelBase {
   };
 }
 
+/** Where a risk stands, after SAFe's ROAM: not looked at yet, someone owns it, accepted as it is,
+    mitigated, or resolved. "Open" and "Owned" still need attention. */
+export type Roam = "Open" | "Owned" | "Accepted" | "Mitigated" | "Resolved";
+
+export interface RiskItem {
+  id: string;
+  title: string;
+  owner: string;
+  impact: Severity;
+  roam: Roam;
+  /** What is being done about it, or why it was accepted. */
+  note: string;
+}
+
+/** A manual risk register. Risks need a person's judgement, so they are not read from Jira. */
+export interface RisksPanel extends PanelBase {
+  type: "risks";
+  data: { items: RiskItem[] };
+}
+
+/** Which dependencies a dependencies panel shows. */
+export interface DepSource {
+  /** The issues whose dependencies are shown. May use the PI variables. */
+  jql: string;
+  /** Names of the Jira link types to read. Empty = every link whose wording reads as a
+      dependency ("blocks", "depends on" and the like). */
+  linkTypes: string[];
+  /** Also list dependencies that are settled (the issue waited on is done). Display only. */
+  showDone: boolean;
+  /** Most rows to show, 1-50. Display only. */
+  limit: number;
+}
+
+/** Dependencies between Jira issues, read from their issue links. Read-only. */
+export interface DependenciesPanel extends PanelBase {
+  type: "dependencies";
+  data: { source: DepSource | null };
+}
+
 export type Panel =
   | StatementPanel
   | KpiPanel
@@ -276,7 +319,9 @@ export type Panel =
   | ActionsPanel
   | KanbanPanel
   | ProgressPanel
-  | BurnupPanel;
+  | BurnupPanel
+  | RisksPanel
+  | DependenciesPanel;
 export type PanelType = Panel["type"];
 
 export interface Wall {
@@ -360,6 +405,10 @@ export interface BoardCard {
   blockedReason: string;
   /** Whole days in the current status category. Null when Jira does not report it. */
   ageDays: number | null;
+  /** Status category in Jira: "new", "indeterminate" (in progress) or "done". Absent on an older server. */
+  category?: string;
+  /** Whole days since anyone updated the issue in Jira. Null or absent when that is not known. */
+  idleDays?: number | null;
 }
 
 export interface BoardColumn {
@@ -409,6 +458,40 @@ export interface MetricResult {
   detail: string;
   /** Oldest first. Weekly points for the look-back metrics, daily snapshots for the rest. */
   history: MetricPoint[];
+  fetchedAt: string;
+}
+
+/** One end of a dependency. */
+export interface DepIssue {
+  key: string;
+  /** Jira summary, or the key when summaries are switched off. */
+  title: string;
+  url: string;
+  status: string;
+  /** Jira's status category: "new", "indeterminate" (in progress) or "done". */
+  category: string;
+  /** The project key, e.g. "PLAT": two different ones make the dependency cross-team. */
+  project: string;
+}
+
+export interface Dependency {
+  /** The issue that cannot finish until `on` has. */
+  waiting: DepIssue;
+  on: DepIssue;
+  /** Name of the Jira link type, e.g. "Blocks". */
+  type: string;
+}
+
+/** Result for one dependencies panel. When ok is false only `error` is meaningful. */
+export interface DepsResult {
+  ok: boolean;
+  error?: string;
+  /** What needs attention first; at most 200. */
+  deps: Dependency[];
+  /** How many there are in all, which can be more than deps.length. */
+  total: number;
+  /** How many issues the query matched. */
+  scope: number;
   fetchedAt: string;
 }
 
@@ -466,6 +549,8 @@ export interface ServerState {
   metrics: Record<string, MetricResult>;
   /** Keyed by BurnupPanel.id, for charts with a source. Missing = not fetched yet. Absent on an older server. */
   burnups: Record<string, ProgressResult>;
+  /** Keyed by DependenciesPanel.id, for panels with a source. Missing = not fetched yet. Absent on an older server. */
+  deps: Record<string, DepsResult>;
   periods: Periods;
   sync: SyncInfo;
   /** Absent on an older server: treat as unlocked. */
@@ -522,6 +607,36 @@ export interface SaveRoomConflict {
   error: "conflict";
   version: number;
   room: Room;
+}
+
+/** One saved version of the room, as listed by GET /api/room/history. */
+export interface RoomVersionInfo {
+  version: number;
+  savedAt: string;
+  roomName: string;
+  /** How many walls and panels the room held in this version. */
+  walls: number;
+  panels: number;
+  /** What this save changed, in plain words: "Added panel PI burn-up to Delivery". At most a handful. */
+  changes: string[];
+  /** How many more changes there were than `changes` lists. */
+  more: number;
+}
+
+/** GET /api/room/history: the versions the server still keeps (the last 100), newest first.
+    Needs edit rights, like everything except reading the room. */
+export interface RoomHistory {
+  /** The version that is live now. 0 when no room has been saved. */
+  current: number;
+  versions: RoomVersionInfo[];
+}
+
+/** GET /api/room/history?version=N: one kept version, for restoring. 404 when it is no longer kept. */
+export interface RoomVersion {
+  version: number;
+  savedAt: string;
+  /** As it was saved; run it through normalizeRoom before use. */
+  room: unknown;
 }
 
 export interface BlockedRule {
@@ -586,6 +701,7 @@ export interface PreviewRequest {
   auto?: AutoSource;
   board?: BoardSource;
   metric?: Metric;
+  deps?: DepSource;
 }
 
 /** POST /api/sync response. */

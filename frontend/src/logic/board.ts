@@ -1,6 +1,7 @@
 /* Jira-fed flow boards: turning the server's board result into the columns and cards that get drawn. */
 import type { BoardCard, BoardResult, BoardSource, KanbanPanel } from "../types";
 import { missingReason, type LiveData } from "./progress";
+import { CARD_STALE_DEFAULT, CARD_STALE_MAX, cardStaleDays, staleText, staleThreshold } from "./stale";
 import { clamp, fmtTime } from "./util";
 
 export const MAX_CARDS_MIN = 1;
@@ -13,11 +14,16 @@ export const defaultBoardSource = (boardId: number): BoardSource => ({
   hiddenColumns: [],
   maxCards: 6,
   doneDays: 14,
+  staleDays: CARD_STALE_DEFAULT,
 });
 
 export interface BoardCardView extends BoardCard {
   /** "5d" for cards in the middle columns whose age is known, else "". */
   age: string;
+  /** "Stale 9d" for an in-progress card nobody has updated for the board's threshold or longer, else "". */
+  staleText: string;
+  /** The same in a sentence, for the tooltip. "" when not stale. */
+  staleTitle: string;
   /** "3 pts" or "1 pt", or "" without an estimate. */
   pointsText: string;
 }
@@ -44,6 +50,9 @@ export interface BoardView {
   blocked: number;
   /** Columns over their WIP limit. */
   overWip: number;
+  /** Stale cards outside the last column, counted over every card the server sent (at most 30 a column),
+      not only the ones within the cards-per-column setting. */
+  stale: number;
   total: number;
 }
 
@@ -61,7 +70,7 @@ function visibleColumns(source: BoardSource, r: BoardResult): BoardResult["colum
 export function boardView(panel: KanbanPanel, live: LiveData): BoardView | null {
   const source = panel.data.jira;
   if (!source) return null;
-  const empty = { columns: [], footer: "", blocked: 0, overWip: 0, total: 0 };
+  const empty = { columns: [], footer: "", blocked: 0, overWip: 0, stale: 0, total: 0 };
   const r = live.boards[panel.id];
   if (!r) {
     const m = missingReason(live);
@@ -72,6 +81,10 @@ export function boardView(panel: KanbanPanel, live: LiveData): BoardView | null 
   const cols = visibleColumns(source, r);
   const maxCards = clamp(Math.round(Number(source.maxCards) || 6), MAX_CARDS_MIN, MAX_CARDS_MAX);
   const last = cols.length - 1;
+  const threshold = staleThreshold(source.staleDays, CARD_STALE_DEFAULT, CARD_STALE_MAX);
+  // The last column is finished work as far as the board is concerned, whatever its statuses are called.
+  const staleDaysOf = (card: BoardCard, column: number): number | null => (column < last ? cardStaleDays(card, threshold) : null);
+  const stale = cols.reduce((n, c, i) => n + (c.cards ?? []).filter((card) => staleDaysOf(card, i) !== null).length, 0);
   const columns = cols.map((c, i): BoardColumnView => {
     const shown = (c.cards ?? []).slice(0, maxCards);
     const total = Math.max(Number(c.total) || 0, (c.cards ?? []).length);
@@ -83,11 +96,16 @@ export function boardView(panel: KanbanPanel, live: LiveData): BoardView | null 
       total,
       over,
       countText: `${total}${Number(c.wip) > 0 ? ` / ${c.wip}` : ""}${over ? " over" : ""}`,
-      cards: shown.map((card) => ({
-        ...card,
-        age: middle && card.ageDays !== null && card.ageDays !== undefined && isFinite(Number(card.ageDays)) ? `${Math.max(0, Math.round(Number(card.ageDays)))}d` : "",
-        pointsText: card.points !== null && card.points !== undefined && isFinite(Number(card.points)) ? `${Number(card.points)} ${Number(card.points) === 1 ? "pt" : "pts"}` : "",
-      })),
+      cards: shown.map((card) => {
+        const idle = staleDaysOf(card, i);
+        return {
+          ...card,
+          staleText: staleText(idle),
+          staleTitle: idle === null ? "" : `In progress, and not updated in Jira for ${idle} ${idle === 1 ? "day" : "days"}`,
+          age: middle && card.ageDays !== null && card.ageDays !== undefined && isFinite(Number(card.ageDays)) ? `${Math.max(0, Math.round(Number(card.ageDays)))}d` : "",
+          pointsText: card.points !== null && card.points !== undefined && isFinite(Number(card.points)) ? `${Number(card.points)} ${Number(card.points) === 1 ? "pt" : "pts"}` : "",
+        };
+      }),
       more: Math.max(0, total - shown.length),
     };
   });
@@ -95,9 +113,10 @@ export function boardView(panel: KanbanPanel, live: LiveData): BoardView | null 
     state: "ok",
     message: "",
     columns,
-    footer: [r.boardName, r.sprint?.name, r.fetchedAt ? `read ${fmtTime(r.fetchedAt)}` : ""].filter(Boolean).join(" · "),
+    footer: [r.boardName, r.sprint?.name, stale ? `${stale} stale` : "", r.fetchedAt ? `read ${fmtTime(r.fetchedAt)}` : ""].filter(Boolean).join(" · "),
     blocked: Number(r.blocked) || 0,
     overWip: columns.filter((c) => c.over).length,
+    stale,
     total: Number(r.total) || 0,
   };
 }

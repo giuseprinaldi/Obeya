@@ -16,7 +16,7 @@ from email.message import Message
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from .access import AccessControl, AccessError
 from .config import Config
@@ -24,8 +24,9 @@ from .db import Database
 from .diagnostics import run_diagnostics
 from .jira_client import JiraError, JiraUnavailable
 from .flow import clean_blocked_rule
+from .history import capped, describe_change, summary
 from .periods import clean_calendar, field_ref
-from .sources import normalize_auto, normalize_board, normalize_metric, normalize_source, text_values
+from .sources import normalize_auto, normalize_board, normalize_deps, normalize_metric, normalize_source, text_values
 from .sync import Syncer
 
 log = logging.getLogger("obeya.http")
@@ -37,6 +38,7 @@ class Request:
     body: Any
     headers: Mapping[str, str]
     set_cookies: list = field(default_factory=list)   # Set-Cookie values for the response
+    query: dict = field(default_factory=dict)         # URL query parameters, first value of each
 
 
 class ApiError(Exception):
@@ -99,6 +101,7 @@ class App:
             ("POST", "/api/lock"): self.lock,
             ("PUT", "/api/passcode"): self.set_passcode,
             ("PUT", "/api/room"): self.save_room,
+            ("GET", "/api/room/history"): self.room_history,
             ("GET", "/api/settings"): self.get_settings,
             ("PUT", "/api/settings"): self.save_settings,
             ("POST", "/api/sync"): self.sync_now,
@@ -109,7 +112,7 @@ class App:
             ("GET", "/api/jira/pi-values"): self.jira_pi_values,
             ("POST", "/api/jira/preview"): self.jira_preview,
         }
-        self.wants_request = {self.state, self.unlock, self.lock, self.set_passcode}
+        self.wants_request = {self.state, self.unlock, self.lock, self.set_passcode, self.room_history}
         # Open to everyone, locked or not. Everything else needs edit rights once locked:
         # that includes the Jira endpoints, which would otherwise let a visitor run
         # queries with the service account.
@@ -178,6 +181,33 @@ class App:
         self.syncer.wake()
         return {"version": saved["version"], "updatedAt": saved["updated_at"].isoformat(timespec="seconds")}
 
+    def room_history(self, req: Request) -> dict:
+        """The kept versions of the room, newest first, each with what changed in it.
+        With ?version=N, that one version's room instead, for restoring."""
+        wanted = req.query.get("version")
+        if wanted is not None:
+            if not (wanted.isascii() and wanted.isdigit()) or len(wanted) > 9:
+                raise ApiError(400, "version must be a whole number.")
+            row = self.db.room_version(int(wanted))
+            if row is None:
+                raise ApiError(404, f"Version {int(wanted)} is not kept any more. The server keeps the last 100.")
+            return {"version": row["version"], "savedAt": row["saved_at"].isoformat(timespec="seconds"),
+                    "room": row["doc"]}
+        rows = self.db.room_versions()
+        current = self.db.get_room()
+        versions = []
+        for n, row in enumerate(rows):
+            if n + 1 < len(rows):
+                lines = describe_change(rows[n + 1]["doc"], row["doc"])
+            elif row["version"] == 1:
+                lines = describe_change(None, row["doc"])
+            else:
+                lines = ["The oldest version kept"]   # what it changed is no longer known
+            shown, more = capped(lines)
+            versions.append({"version": row["version"], "savedAt": row["saved_at"].isoformat(timespec="seconds"),
+                             **summary(row["doc"]), "changes": shown, "more": more})
+        return {"current": current["version"] if current else 0, "versions": versions}
+
     def get_settings(self, _body: Any) -> dict:
         return clean_settings(self.db.get_settings())
 
@@ -242,8 +272,11 @@ class App:
 
     def jira_preview(self, body: Any) -> dict:
         if not isinstance(body, dict):
-            raise ApiError(400, "Expected one of {source}, {auto}, {board} or {metric}.")
-        if body.get("board") is not None:
+            raise ApiError(400, "Expected one of {source}, {auto}, {board}, {metric} or {deps}.")
+        if body.get("deps") is not None:
+            spec = normalize_deps(body["deps"])
+            missing = "Enter the query whose dependencies to show first."
+        elif body.get("board") is not None:
             spec = normalize_board(body["board"])
             missing = "Pick a Jira board first."
         elif body.get("metric") is not None:
@@ -296,7 +329,8 @@ def make_handler(app: App):
             if handler is None:
                 self._json(404, {"error": "No such endpoint."})
                 return
-            req = Request(None, self.headers)
+            req = Request(None, self.headers,
+                          query={k: v[0] for k, v in parse_qs(urlsplit(self.path).query).items()})
             try:
                 if method in ("PUT", "POST"):
                     req.body = self._body()

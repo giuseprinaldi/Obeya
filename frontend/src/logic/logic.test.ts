@@ -17,7 +17,7 @@ const periods = (over: Partial<Periods> = {}): Periods => ({
   ...over,
 });
 
-const live = (over: Partial<LiveData> = {}): LiveData => ({ progress: {}, auto: {}, boards: {}, metrics: {}, burnups: {}, periods: periods(), jiraConfigured: true, ...over });
+const live = (over: Partial<LiveData> = {}): LiveData => ({ progress: {}, auto: {}, boards: {}, metrics: {}, burnups: {}, deps: {}, periods: periods(), jiraConfigured: true, ...over });
 
 const result = (over: Partial<ProgressResult> = {}): ProgressResult => ({
   ok: true,
@@ -54,7 +54,7 @@ const progressPanel = (data: Partial<ProgressPanel["data"]> = {}): ProgressPanel
   type: "progress",
   title: "PI objectives",
   span: 3,
-  data: { items: [], auto: null, autoDisplay: defaultDisplay(), sort: "manual", showKeys: true, showTrend: true, ...data },
+  data: { items: [], auto: null, autoDisplay: defaultDisplay(), sort: "manual", showKeys: true, showTrend: true, staleDays: 14, ...data },
 });
 
 describe("dates", () => {
@@ -255,10 +255,11 @@ describe("signals", () => {
     expect(isLate({ id: "a", text: "", owner: "", due: "2026-11-01", done: true }, "2026-11-10")).toBe(false);
   });
   it("counts only the hand-entered parts of the example room while Jira is not connected", () => {
-    // Three KPIs on each of two walls and the delivery flow board read from Jira, so they add nothing here.
+    // Three KPIs on each of two walls, the delivery flow board and the dependencies panel read from Jira, so they
+    // add nothing here. The two high-severity items are one open problem and one risk nobody owns yet.
     const room = seed("program");
     const s = signals(room.walls.flatMap((w) => w.panels), live({ jiraConfigured: false, periods: periods({ today: todayISO() }) }));
-    expect(s).toMatchObject({ kpiBad: 1, kpiWarn: 2, off: 1, risk: 1, blocked: 0, overWip: 0, openHigh: 1, late: 1, barBad: 0, jiraFailing: 0 });
+    expect(s).toMatchObject({ kpiBad: 1, kpiWarn: 2, off: 1, risk: 1, blocked: 0, overWip: 0, openHigh: 2, late: 1, barBad: 0, jiraFailing: 0, waiting: 0 });
   });
 });
 

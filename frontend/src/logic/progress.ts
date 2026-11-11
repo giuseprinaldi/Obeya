@@ -3,6 +3,7 @@ import type {
   AutoResult,
   BarDisplay,
   BoardResult,
+  DepsResult,
   JiraSourceOptions,
   MetricResult,
   Pace,
@@ -13,6 +14,7 @@ import type {
   ProgressResult,
   Status,
 } from "../types";
+import { BAR_STALE_DEFAULT, BAR_STALE_MAX, isStalled, staleThreshold, stalledDays } from "./stale";
 import { barTrend, type BarTrend } from "./trend";
 import { clamp, daysBetween, fmtNum } from "./util";
 
@@ -26,6 +28,8 @@ export interface LiveData {
   metrics: Record<string, MetricResult>;
   /** Burn-up charts, keyed by panel id. */
   burnups: Record<string, ProgressResult>;
+  /** Dependencies panels, keyed by panel id. */
+  deps: Record<string, DepsResult>;
   periods: Periods;
   jiraConfigured: boolean;
 }
@@ -107,6 +111,12 @@ export interface BarView {
   status: Status;
   /** How a Jira-linked bar has moved lately. Null for manual bars and until there is a day to compare with. */
   trend: BarTrend | null;
+  /** Whole days for which the done amount has not gone up, as far as the bar's history shows.
+      Null for manual bars and until there is an earlier day to compare with. */
+  stalledDays: number | null;
+  /** Started, not finished, and without progress for the panel's threshold or longer. Decided by
+      resolveBars, which knows the panel; a bar worked out on its own is never stale. */
+  stale: boolean;
 }
 
 export const UNIT: Record<ProgressResult["unit"], string> = { issues: "issues", points: "pts" };
@@ -134,6 +144,8 @@ function measured(
     expected,
     status: has ? barStatus(pct, expected) : "none",
     trend: has ? barTrend(n.history, n, periods.today) : null,
+    stalledDays: has ? stalledDays(n.history, n.done, periods.today) : null,
+    stale: false,
   };
 }
 
@@ -156,6 +168,8 @@ function unavailable(
     expected: null,
     status: state === "error" ? "warn" : "none",
     trend: null,
+    stalledDays: null,
+    stale: false,
   };
 }
 
@@ -269,6 +283,9 @@ export function resolveBars(panel: ProgressPanel, live: LiveData): PanelBars {
       else if (!res.bars.length) autoNote = "The Jira query for this panel matches nothing right now.";
     }
   }
+  // Whether a quiet bar counts as stale is the panel's call: it holds the threshold.
+  const threshold = staleThreshold(d.staleDays, BAR_STALE_DEFAULT, BAR_STALE_MAX);
+  for (const b of bars) b.stale = b.state === "ok" && isStalled(b, threshold);
   return { bars: sortBars(bars, d.sort), autoNote, autoFailed };
 }
 
@@ -287,6 +304,7 @@ export function barPill(b: BarView): { text: string; status: Status } | null {
   if (b.pct >= 100) return { text: "Done", status: "good" };
   if (b.status === "bad") return { text: "Behind", status: "bad" };
   if (b.status === "warn") return { text: "At risk", status: "warn" };
+  if (b.stale && b.stalledDays !== null) return { text: `No progress ${b.stalledDays}d`, status: "warn" };
   return null;
 }
 

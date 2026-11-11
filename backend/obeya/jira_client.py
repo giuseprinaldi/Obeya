@@ -171,6 +171,11 @@ class JiraClient:
                 self._categories_at = time.time()
             return self._categories
 
+    def link_types(self) -> list[dict]:
+        """The issue link types this Jira has, each with its name and how it reads from either end."""
+        found = (self._request("GET", "/rest/api/2/issueLinkType") or {}).get("issueLinkTypes")
+        return [t for t in found if isinstance(t, dict)] if isinstance(found, list) else []
+
     # ---- search ----
 
     def search(self, jql: str, fields: list[str], limit: int = 2000, changelog: bool = False) -> tuple[list[dict], bool]:

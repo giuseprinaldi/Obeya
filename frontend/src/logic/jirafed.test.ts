@@ -16,6 +16,7 @@ const live = (over: Partial<LiveData> = {}): LiveData => ({
   boards: {},
   metrics: {},
   burnups: {},
+  deps: {},
   periods: { today: "2026-11-10", pi: null, nextPi: null, sprint: null },
   jiraConfigured: true,
   ...over,
@@ -277,7 +278,7 @@ describe("example room", () => {
   it("reads the delivery board and sprint KPIs from Jira, keeping the manual board as the fallback", () => {
     const delivery = seed("program").walls[2]!;
     const flow = delivery.panels.find((p) => p.type === "kanban") as KanbanPanel;
-    expect(flow.data.jira).toEqual({ boardId: 1, jql: "", sprint: "active", hiddenColumns: [], maxCards: 6, doneDays: 14 });
+    expect(flow.data.jira).toEqual({ boardId: 1, jql: "", sprint: "active", hiddenColumns: [], maxCards: 6, doneDays: 14, staleDays: 7 });
     expect(flow.data.columns).toHaveLength(5);
     expect(flow.data.cards).toHaveLength(12);
     const health = delivery.panels.find((p) => p.type === "kpi") as KpiPanel;
@@ -347,7 +348,7 @@ describe("normalizeRoom with Jira-fed panels", () => {
       const data = { columns: [{ id: "c", name: "To do", wip: 0 }], cards: [{ id: "x", title: "Kept", col: "c" }], jira };
       return (room([{ id: "k", type: "kanban", title: "Flow", data }]).walls[0]!.panels[0] as KanbanPanel).data;
     };
-    expect(flow({ boardId: 7, sprint: "everything", hiddenColumns: ["Backlog", 5], maxCards: 99, doneDays: -3 }).jira).toEqual({ boardId: 7, jql: "", sprint: "active", hiddenColumns: ["Backlog", "5"], maxCards: 30, doneDays: 0 });
+    expect(flow({ boardId: 7, sprint: "everything", hiddenColumns: ["Backlog", 5], maxCards: 99, doneDays: -3 }).jira).toEqual({ boardId: 7, jql: "", sprint: "active", hiddenColumns: ["Backlog", "5"], maxCards: 30, doneDays: 0, staleDays: 7 });
     expect(flow({ boardId: 7, sprint: "all" }).jira).toMatchObject({ sprint: "all", maxCards: 6, doneDays: 14 });
     const dropped = flow({ jql: "project = PLAT" });
     expect(dropped.jira).toBeNull();

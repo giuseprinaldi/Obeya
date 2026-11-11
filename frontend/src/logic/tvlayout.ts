@@ -2,6 +2,7 @@
    instead of giving every row the same amount. Estimates are in stage pixels and only need to be roughly right. */
 import type { Panel } from "../types";
 import { boardHeight, boardView } from "./board";
+import { depsView } from "./deps";
 import { resolveBars, type LiveData } from "./progress";
 
 const FRAME = 80; // panel title bar plus body padding
@@ -42,6 +43,11 @@ function need(p: Panel, live: LiveData): number {
       if (p.span === 3) return FRAME + (n > TV_TWO_COLUMN_BARS ? Math.ceil(n / 2) : n) * 56;
       return FRAME + n * (p.span === 2 ? 56 : 78);
     }
+    case "risks":
+      return FRAME + Math.max(1, p.data.items.length) * 58;
+    case "dependencies":
+      // One row per dependency shown, and a line of totals under them.
+      return FRAME + 30 + Math.max(1, depsView(p, live).rows.length) * 54;
     case "burnup":
       // The numbers and legend above a plot that is worth at least a third of a screen's height.
       return FRAME + 300;

@@ -5,6 +5,9 @@ import type {
   BarDisplay,
   BurnPeriod,
   BurnupPanel,
+  DependenciesPanel,
+  RisksPanel,
+  Roam,
   JiraSource,
   KanbanPanel,
   KpiPanel,
@@ -24,8 +27,10 @@ import type {
   Wall,
 } from "../types";
 import { defaultBoardSource } from "./board";
+import { defaultDepSource } from "./deps";
 import { defaultMetric } from "./kpi";
 import { defaultDisplay, defaultJiraOptions } from "./progress";
+import { BAR_STALE_DEFAULT } from "./stale";
 import { dayOffset, uid } from "./util";
 
 export const ACCENTS: Record<AccentKey, { name: string; l: string; d: string }> = {
@@ -45,6 +50,8 @@ export const PANEL_TYPES: Record<PanelType, { label: string; desc: string; item:
   portfolio: { label: "Portfolio", desc: "Initiatives with health and progress", item: "Initiative" },
   progress: { label: "Progress bars", desc: "Jira-linked or manual progress", item: "Bar" },
   burnup: { label: "Burn-up chart", desc: "Done against scope over a PI or sprint", item: "" },
+  dependencies: { label: "Dependencies", desc: "What waits on what, from Jira links", item: "" },
+  risks: { label: "Risks", desc: "Risk register with ROAM status", item: "Risk" },
   problems: { label: "Problem solving", desc: "Problems moving through A3 stages", item: "Problem" },
   actions: { label: "Action tracker", desc: "Owners, due dates, done", item: "Action" },
   kanban: { label: "Flow board", desc: "Columns with WIP limits", item: "Card" },
@@ -83,9 +90,13 @@ export function newPanel(type: PanelType, title: string, span: Span): Panel {
         },
       };
     case "progress":
-      return { ...base, type, data: { items: [], auto: null, autoDisplay: defaultDisplay(), sort: "manual", showKeys: true, showTrend: true } };
+      return { ...base, type, data: { items: [], auto: null, autoDisplay: defaultDisplay(), sort: "manual", showKeys: true, showTrend: true, staleDays: BAR_STALE_DEFAULT } };
     case "burnup":
       return { ...base, type, data: { source: null, period: { kind: "pi" } } };
+    case "dependencies":
+      return { ...base, type, data: { source: null } };
+    case "risks":
+      return { ...base, type, data: { items: [] } };
     case "kpi":
       return { ...base, type, data: { items: [] } };
     case "portfolio":
@@ -104,6 +115,7 @@ type PortfolioRow = [name: string, owner: string, health: PortfolioItem["health"
 type ProblemRow = [title: string, owner: string, severity: Severity, stage: Stage, problem: string, cause: string, countermeasure: string];
 type ActionRow = [text: string, owner: string, dueInDays: number, done: boolean];
 type CardRow = [title: string, column: number, owner: string, tag: string, blocked?: boolean];
+type RiskRow = [title: string, owner: string, impact: Severity, roam: Roam, note: string];
 
 const issueLink = (key: string): JiraSource => ({ kind: "issue", key, ...defaultJiraOptions() });
 
@@ -167,9 +179,17 @@ const P = {
     type: "progress",
     title,
     span,
-    data: { items, auto: null, autoDisplay: defaultDisplay(), sort: "manual", showKeys: true, showTrend: true, ...extra },
+    data: { items, auto: null, autoDisplay: defaultDisplay(), sort: "manual", showKeys: true, showTrend: true, staleDays: BAR_STALE_DEFAULT, ...extra },
   }),
   burnup: (title: string, source: JiraSource, period: BurnPeriod, span: Span = 2): BurnupPanel => ({ id: uid(), type: "burnup", title, span, data: { source, period } }),
+  dependencies: (title: string, jql: string, span: Span = 2): DependenciesPanel => ({ id: uid(), type: "dependencies", title, span, data: { source: defaultDepSource(jql) } }),
+  risks: (title: string, rows: RiskRow[], span: Span = 1): RisksPanel => ({
+    id: uid(),
+    type: "risks",
+    title,
+    span,
+    data: { items: rows.map(([t, owner, impact, roam, note]) => ({ id: uid(), title: t, owner, impact, roam, note })) },
+  }),
 };
 
 const paced = (pace: BarDisplay["pace"]): BarDisplay => ({ ...defaultDisplay(), pace });
@@ -340,10 +360,32 @@ export const LIBRARY: Record<string, { name: string; build: () => WallSeed }> = 
       ],
     }),
   },
+  dependencies: {
+    name: "Dependencies & risks",
+    build: () => ({
+      name: "Dependencies & risks",
+      subtitle: "What we are waiting on, and what could go wrong",
+      panels: [
+        // Both example projects, so dependencies between the two programs show up.
+        P.dependencies("Dependencies", "project in (PLAT, DATA)", 2),
+        P.risks(
+          "Risks",
+          [
+            ["Hosting decision slips past the PI", "Program lead", "High", "Open", "No owner on the infrastructure side yet"],
+            ["AI service quota too low for the pilot", "Infra lead", "High", "Owned", "Quota increase requested; answer due next week"],
+            ["Two teams change the proposal schema at once", "Chief architect", "Medium", "Mitigated", "Schema changes go through one review slot"],
+            ["Pilot teams short of time in December", "Scrum master", "Medium", "Accepted", "Demo moved a week earlier"],
+            ["Template library not ready for the demo", "Scrum master", "Low", "Resolved", "Descoped from this PI"],
+          ],
+          1,
+        ),
+      ],
+    }),
+  },
 };
 
 export const TEMPLATES: Record<string, { name: string; desc: string; walls: string[] }> = {
-  program: { name: "Program room", desc: "Leadership and program management", walls: ["direction", "performance", "delivery", "problems"] },
+  program: { name: "Program room", desc: "Leadership and program management", walls: ["direction", "performance", "delivery", "problems", "dependencies"] },
   leadership: { name: "Leadership room", desc: "Strategy, KPIs, problems, actions", walls: ["direction", "performance", "problems"] },
   team: { name: "Team delivery", desc: "Sprint flow and team health", walls: ["delivery", "teamhealth", "problems"] },
 };

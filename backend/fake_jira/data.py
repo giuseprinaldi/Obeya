@@ -54,6 +54,13 @@ CATEGORY_IDS = {"new": 2, "indeterminate": 4, "done": 3}
 
 PEOPLE = ["Priya Shah", "Tom Becker", "Marcus Lee", "Dana Ortiz", "Joe Rinaldi"]
 
+# Link types as Jira describes them. Which end is "inward" differs from type to type.
+LINK_TYPES = [
+    {"id": "10000", "name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
+    {"id": "10001", "name": "Dependency", "inward": "is depended on by", "outward": "depends on"},
+    {"id": "10003", "name": "Relates", "inward": "relates to", "outward": "relates to"},
+]
+
 SPRINT_DAYS = 14
 SPRINT_ANCHOR = date(2026, 1, 5)  # a Monday
 
@@ -122,7 +129,7 @@ class Dataset:
         issue = {"id": str(self._ids), "key": f"{project}-{self._numbers[project]}", "project": project,
                  "type": itype, "summary": summary, "status": status, "epic": None, "parent_link": None,
                  "parent": None, "points": None, "sprints": [], "pi": None,
-                 "assignee": None, "labels": [], "blocked_by": [], "flagged": False,
+                 "assignee": None, "labels": [], "blocked_by": [], "links": [], "flagged": False,
                  "created": self.now - timedelta(days=90), "history": [], "resolved": None}
         issue.update(extra)
         self.issues.append(issue)
@@ -244,6 +251,23 @@ class Dataset:
             if blocker:
                 doing[1]["blocked_by"].append(blocker["key"])
 
+        # Dependencies between the two programs, as "Dependency" links ("A depends on B"): one still
+        # open across projects, one already settled, and a "Relates" link that is not a dependency.
+        # Chosen by position, without the random generator, so the rest of the data stays as it was.
+        def pick(project: str, status: str, skip: int = 0) -> Optional[dict]:
+            found = [i for i in self.issues if i["project"] == project and i["status"] == status
+                     and i["type"] in ("Story", "Bug")]
+            return found[skip] if len(found) > skip else None
+        waiting, provider = pick("DATA", "To Do"), pick("PLAT", "To Do", 1)
+        if waiting and provider:
+            waiting["links"].append(("Dependency", provider["key"]))
+        started, finished = pick("PLAT", "In Progress", 2), pick("DATA", "Done")
+        if started and finished:
+            started["links"].append(("Dependency", finished["key"]))
+        first, second = pick("PLAT", "Done"), pick("DATA", "Done", 1)
+        if first and second:
+            first["links"].append(("Relates", second["key"]))
+
     # ---- Jira JSON ----
 
     def by_key(self, key: str) -> Optional[dict]:
@@ -271,6 +295,23 @@ class Dataset:
                               "inwardIssue": {"id": other["id"], "key": other["key"],
                                               "fields": {"summary": other["summary"],
                                                          "status": status_json(other["status"])}}})
+        # Jira shows a link on both issues. "Blocks" puts the blocker in the inward slot of the
+        # blocked issue; "Dependency" puts the issue depended on in the outward slot.
+        def linked(other: dict) -> dict:
+            return {"id": other["id"], "key": other["key"],
+                    "fields": {"summary": other["summary"], "status": status_json(other["status"]),
+                               "issuetype": {"name": other["type"], "subtask": other["type"] == "Sub-task"}}}
+        types = {t["name"]: {k: t[k] for k in ("name", "inward", "outward")} for t in LINK_TYPES}
+        for other in self.issues:
+            if issue["key"] in other["blocked_by"]:
+                links.append({"id": f"{other['id']}b{issue['id']}", "type": types["Blocks"], "outwardIssue": linked(other)})
+            for name, key in other["links"]:
+                if key == issue["key"]:
+                    links.append({"id": f"{other['id']}l{issue['id']}", "type": types[name], "inwardIssue": linked(other)})
+        for name, key in issue["links"]:
+            other = self.by_key(key)
+            if other:
+                links.append({"id": f"{issue['id']}l{other['id']}", "type": types[name], "outwardIssue": linked(other)})
         full = {
             "summary": issue["summary"],
             "status": status_json(issue["status"]),

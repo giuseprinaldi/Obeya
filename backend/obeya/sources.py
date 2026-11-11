@@ -8,7 +8,7 @@ import re
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 
-from . import flow
+from . import deps, flow
 from .jira_client import JiraClient, JiraError, JiraUnavailable
 from .periods import TemplateError, resolve_jql, sprint_period
 from .progress import empty_totals, issue_view, tally, work_items
@@ -152,6 +152,18 @@ def normalize_metric(raw: Any) -> Optional[dict]:
     return spec
 
 
+def normalize_deps(raw: Any) -> Optional[dict]:
+    """Validate the source of a dependencies panel: a query, and optionally the link
+    types to read. How many rows to show and whether to show settled ones are display
+    settings, so they are not part of the spec."""
+    if not isinstance(raw, dict):
+        return None
+    jql = str(raw.get("jql") or "").strip()
+    if not jql:
+        return None
+    return {"kind": "deps", "jql": jql[:4000], "linkTypes": [n.casefold() for n in _names(raw.get("linkTypes"))][:20]}
+
+
 def is_lookback(spec: dict) -> bool:
     return spec.get("kind") == "metric" and spec.get("metric") in LOOKBACK
 
@@ -222,6 +234,8 @@ class Engine:
                 return self._board(spec)
             if spec["kind"] == "metric":
                 return self._metric(spec)
+            if spec["kind"] == "deps":
+                return self._deps(spec)
             raise SourceError("Unknown kind of Jira link.")
         except JiraUnavailable:
             raise
@@ -342,7 +356,19 @@ class Engine:
             "fetchedAt": _now(),
         }
 
+    def _deps(self, spec: dict) -> dict:
+        """The dependencies of the issues a query matches, read from their issue links."""
+        jql = resolve_jql(spec["jql"], self.pi_field, self.pis, self.today)
+        raw, truncated = self.client.search(jql, ["summary", "status", "issuetype", "issuelinks"], limit=JQL_LIMIT)
+        if truncated:
+            raise SourceError(f"This query matches more than {JQL_LIMIT} issues. Narrow it down.")
+        found = deps.dependencies(raw, self.client.base_url, spec["linkTypes"], self.show_summaries)
+        return {"ok": True, "deps": found[:deps.MAX_DEPENDENCIES], "total": len(found), "scope": len(raw),
+                "fetchedAt": _now()}
+
     def _failed(self, spec: dict, message: str) -> dict:
+        if spec["kind"] == "deps":
+            return {"ok": False, "error": message, "deps": [], "total": 0, "scope": 0, "fetchedAt": _now()}
         if spec["kind"] == "auto":
             return {"ok": False, "error": message, "bars": [], "truncated": False, "fetchedAt": _now()}
         if spec["kind"] == "board":
@@ -396,7 +422,8 @@ class Engine:
         fields = raw.get("fields") or {}
         reason = flow.blocked_reason(raw, self.blocked_rule, self.flagged_field)
         changed = flow.parse_ts(fields.get("statuscategorychangedate"))
-        assignee = fields.get("assignee") if isinstance(fields.get("assignee"), dict) else {}
+        updated = flow.parse_ts(fields.get("updated"))
+        assignee =fields.get("assignee") if isinstance(fields.get("assignee"), dict) else {}
         return {
             "key": view["key"],
             "title": view["summary"] if self.show_summaries else view["key"],
@@ -408,6 +435,9 @@ class Engine:
             "blocked": bool(reason),
             "blockedReason": reason,
             "ageDays": max(0, (now - changed).days) if changed else None,
+            # For the stale flag: is the work under way, and how long since anyone touched the issue.
+            "category": view["category"],
+            "idleDays": max(0, (now - updated).days) if updated else None,
         }
 
     def _board(self, spec: dict) -> dict:

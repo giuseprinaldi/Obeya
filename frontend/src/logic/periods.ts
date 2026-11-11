@@ -49,6 +49,7 @@ export function roomUsesPi(room: Room): boolean {
       if (p.type === "portfolio") {
         if (p.data.items.some((x) => x.source?.kind === "jql" && usesPiVar(x.source.jql))) return true;
       }
+      if (p.type === "dependencies" && usesPiVar(p.data.source?.jql)) return true;
       if (p.type === "burnup" && p.data.source) {
         if (p.data.period.kind === "pi" || (p.data.source.kind === "jql" && usesPiVar(p.data.source.jql))) return true;
       }

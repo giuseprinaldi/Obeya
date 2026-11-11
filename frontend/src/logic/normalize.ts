@@ -26,9 +26,11 @@ import type {
   Wall,
 } from "../types";
 import { MAX_CARDS_MAX, MAX_CARDS_MIN } from "./board";
+import { DEP_LIMIT_MAX, DEP_LIMIT_MIN, ROAMS } from "./deps";
 import { parseIssueKey } from "./jira";
 import { METRIC_KINDS, WINDOW_MAX, WINDOW_MIN } from "./kpi";
 import { defaultDisplay } from "./progress";
+import { BAR_STALE_DEFAULT, BAR_STALE_MAX, CARD_STALE_DEFAULT, CARD_STALE_MAX, staleThreshold } from "./stale";
 import { clamp, uid } from "./util";
 
 type Obj = Record<string, unknown>;
@@ -136,6 +138,7 @@ function boardSource(x: unknown): BoardSource | null {
     hiddenColumns: strList(x.hiddenColumns),
     maxCards: clamp(Math.round(num(x.maxCards, 6)), MAX_CARDS_MIN, MAX_CARDS_MAX),
     doneDays: Math.max(0, Math.round(num(x.doneDays, 14))),
+    staleDays: staleThreshold(x.staleDays, CARD_STALE_DEFAULT, CARD_STALE_MAX),
   };
 }
 
@@ -249,11 +252,33 @@ function panel(x: Obj): Panel | null {
           sort: oneOf(d.sort, SORTS, "manual"),
           showKeys: d.showKeys !== false,
           showTrend: d.showTrend !== false,
+          staleDays: staleThreshold(d.staleDays, BAR_STALE_DEFAULT, BAR_STALE_MAX),
         },
       };
     case "burnup": {
       const period = pace(d.period);
       return { ...base, type: "burnup", data: { source: jiraSource(d.source), period: period.kind === "none" ? { kind: "pi" } : period } };
+    }
+    case "risks":
+      return {
+        ...base,
+        type: "risks",
+        data: {
+          items: objs(d.items).map((r) => ({
+            id: id(r.id),
+            title: str(r.title),
+            owner: str(r.owner),
+            impact: oneOf(r.impact, SEVERITY_NAMES, "Medium"),
+            roam: oneOf(r.roam, ROAMS, "Open"),
+            note: str(r.note),
+          })),
+        },
+      };
+    case "dependencies": {
+      const s = isObj(d.source) ? d.source : null;
+      const jql = s ? str(s.jql).trim() : "";
+      const source = s && jql ? { jql, linkTypes: strList(s.linkTypes), showDone: s.showDone === true, limit: clamp(Math.round(num(s.limit, 12)), DEP_LIMIT_MIN, DEP_LIMIT_MAX) } : null;
+      return { ...base, type: "dependencies", data: { source } };
     }
     default:
       return null;

@@ -220,7 +220,8 @@ class Diagnostics(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual({c["status"] for c in result["checks"]}, {"pass"}, [c for c in result["checks"] if c["status"] != "pass"])
         self.assertEqual(list(checks), ["configured", "reachable", "token", "visible", "fields", "flagged", "hierarchy",
-                                        "pi_field", "calendar", "boards", "statuses", "history", "age"])
+                                        "pi_field", "calendar", "boards", "statuses", "history", "age", "links"])
+        self.assertIn("Blocks, Dependency", checks["links"]["detail"])     # "Relates" does not read as a dependency
         self.assertIn("9.12.4", checks["reachable"]["detail"])
         self.assertIn("Obeya service account", checks["token"]["detail"])
         self.assertIn("PI 26.4", checks["pi_field"]["detail"])
@@ -319,7 +320,7 @@ class DiagnosticsApi(ApiCase):
         call(self.base, "PUT", "/api/settings", suggested_settings(self.fake.dataset))
         status, body, _ = call(self.base, "GET", "/api/jira/diagnostics")
         self.assertEqual((status, body["ok"]), (200, True))
-        self.assertEqual(len(body["checks"]), 13)
+        self.assertEqual(len(body["checks"]), 14)
         self.assertEqual(set(body["checks"][0]), {"id", "label", "status", "detail", "fix"})
 
 

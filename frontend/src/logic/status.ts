@@ -2,6 +2,7 @@
 import type { ActionItem, Panel, Status } from "../types";
 import { boardView } from "./board";
 import { burnupView } from "./burnup";
+import { depsView, riskLive, riskStatus } from "./deps";
 import { effectiveKpi } from "./kpi";
 import { resolveBars, type LiveData } from "./progress";
 
@@ -25,11 +26,16 @@ export interface Signals {
   barWarn: number;
   /** Jira links that failed: bars, panel queries, Jira KPIs, Jira boards and burn-up charts. */
   jiraFailing: number;
+  /** Work under way that has gone quiet: in-progress Jira cards nobody has updated, and started bars
+      with no progress, each for as long as its panel's threshold. */
+  stale: number;
+  /** Work under way that is held up by a dependency on something unfinished. */
+  waiting: number;
   items: number;
 }
 
 export function signals(panels: Panel[], live: LiveData): Signals {
-  const s: Signals = { kpiBad: 0, kpiWarn: 0, blocked: 0, overWip: 0, late: 0, openHigh: 0, open: 0, off: 0, risk: 0, barBad: 0, barWarn: 0, jiraFailing: 0, items: 0 };
+  const s: Signals = { kpiBad: 0, kpiWarn: 0, blocked: 0, overWip: 0, late: 0, openHigh: 0, open: 0, off: 0, risk: 0, barBad: 0, barWarn: 0, jiraFailing: 0, stale: 0, waiting: 0, items: 0 };
   const today = live.periods.today;
   for (const p of panels) {
     switch (p.type) {
@@ -50,6 +56,7 @@ export function signals(panels: Panel[], live: LiveData): Signals {
           s.items += board.total;
           s.blocked += board.blocked;
           s.overWip += board.overWip;
+          s.stale += board.stale;
           break;
         }
         const cols = p.data.columns;
@@ -94,6 +101,7 @@ export function signals(panels: Panel[], live: LiveData): Signals {
           s.items++;
           if (b.status === "bad") s.barBad++;
           else if (b.status === "warn") s.barWarn++;
+          if (b.stale) s.stale++;
         }
         break;
       }
@@ -107,6 +115,21 @@ export function signals(panels: Panel[], live: LiveData): Signals {
         else if (v.status === "warn") s.barWarn++;
         break;
       }
+      case "risks":
+        // A live risk keeps the panel amber, like an open problem; a high one nobody has taken is red.
+        for (const r of p.data.items) {
+          s.items++;
+          if (riskLive(r)) s.open++;
+          if (riskStatus(r) === "bad") s.openHigh++;
+        }
+        break;
+      case "dependencies": {
+        const v = depsView(p, live);
+        if (v.state === "error") s.jiraFailing++;
+        s.items += v.waiting + v.open;
+        s.waiting += v.waiting;
+        break;
+      }
       case "statement":
         break;
     }
@@ -115,10 +138,10 @@ export function signals(panels: Panel[], live: LiveData): Signals {
 }
 
 /** Things that need attention now: these raise the red flag on a wall's tab. */
-export const badCount = (s: Signals): number => s.kpiBad + s.blocked + s.late + s.openHigh + s.off + s.barBad;
+export const badCount = (s: Signals): number => s.kpiBad + s.blocked + s.late + s.openHigh + s.off + s.barBad + s.waiting;
 
 /** Things to watch on a wall's screen in the room plan. */
-export const watchCount = (s: Signals): number => s.kpiWarn + s.risk + s.overWip + s.barWarn + s.jiraFailing;
+export const watchCount = (s: Signals): number => s.kpiWarn + s.risk + s.overWip + s.barWarn + s.jiraFailing + s.stale;
 
 export function panelStatus(p: Panel, live: LiveData): Status {
   if (p.type === "statement") return "none";
@@ -148,9 +171,11 @@ export function chipList(s: Signals): Chip[] {
   add(s.late, "late", "bad");
   add(s.openHigh, "high severity", "bad");
   add(s.barBad, "behind pace", "bad");
+  add(s.waiting, "waiting on a dependency", "bad");
   add(s.kpiWarn, "near target", "warn");
   add(s.risk + s.barWarn, "at risk", "warn");
   add(s.overWip, "over WIP", "warn");
+  add(s.stale, "stale", "warn");
   add(s.jiraFailing, s.jiraFailing > 1 ? "Jira links failing" : "Jira link failing", "warn");
   if (!out.length) out.push({ text: "All clear", status: "good" });
   return out;

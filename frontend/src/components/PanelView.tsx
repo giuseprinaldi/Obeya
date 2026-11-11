@@ -23,6 +23,7 @@ import type {
 } from "../types";
 import { findPanel, useUi } from "../ui";
 import { BurnupBody } from "./BurnupChart";
+import { DependenciesBody, RisksBody } from "./DepsRisks";
 
 const HEALTH: Record<"on" | "risk" | "off", [string, Status]> = {
   on: ["On track", "good"],
@@ -350,6 +351,11 @@ function JiraCard({ card, tv }: { card: BoardCardView; tv: boolean }) {
             {card.age}
           </span>
         ) : null}
+        {card.staleText ? (
+          <span className="stale" title={card.staleTitle}>
+            {card.staleText}
+          </span>
+        ) : null}
       </span>
     </>
   );
@@ -501,6 +507,10 @@ function Body({ panel, live, tv }: BodyProps<Panel>) {
       return <ProgressBody panel={panel} live={live} tv={tv} />;
     case "burnup":
       return <BurnupBody panel={panel} live={live} tv={tv} />;
+    case "dependencies":
+      return <DependenciesBody panel={panel} live={live} tv={tv} />;
+    case "risks":
+      return <RisksBody panel={panel} live={live} tv={tv} />;
     case "problems":
       return <ProblemsBody panel={panel} live={live} tv={tv} />;
     case "actions":

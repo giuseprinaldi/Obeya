@@ -4,6 +4,7 @@ import { ControlBar, Overview, WallView } from "./components/Editor";
 import { PinnedDisplay, ScreenDisplay } from "./components/TvView";
 import { UnlockDialog } from "./components/dialogs/AccessDialogs";
 import { BarDialog } from "./components/dialogs/BarDialog";
+import { HistoryDialog } from "./components/dialogs/HistoryDialog";
 import { ItemDialog } from "./components/dialogs/ItemDialog";
 import { JiraSettingsDialog } from "./components/dialogs/JiraSettingsDialog";
 import { KpiDialog } from "./components/dialogs/KpiDialog";
@@ -29,7 +30,7 @@ function RoomDialog({ spec, room, close }: { spec: Exclude<DialogSpec, { kind: "
   switch (spec.kind) {
     case "item": {
       const p = findPanel(room, spec.panelId)?.panel;
-      if (!p || p.type === "statement" || p.type === "progress" || p.type === "burnup") return null;
+      if (!p || p.type === "statement" || p.type === "progress" || p.type === "burnup" || p.type === "dependencies") return null;
       if (p.type === "kpi") return <KpiDialog panel={p} itemId={spec.itemId} onClose={close} />;
       return <ItemDialog panel={p} itemId={spec.itemId} col={spec.col} onClose={close} />;
     }
@@ -53,6 +54,8 @@ function RoomDialog({ spec, room, close }: { spec: Exclude<DialogSpec, { kind: "
       return <AddWallDialog onClose={close} />;
     case "customize":
       return <CustomizeDialog room={room} onClose={close} />;
+    case "history":
+      return <HistoryDialog onClose={close} />;
     case "jira":
       return <JiraSettingsDialog onClose={close} />;
   }
@@ -76,7 +79,7 @@ export function App() {
     }),
     [canEdit],
   );
-  const live = useMemo(() => liveOf(s), [s.progress, s.auto, s.boards, s.metrics, s.burnups, s.periods, s.sync.jiraConfigured]);
+  const live = useMemo(() => liveOf(s), [s.progress, s.auto, s.boards, s.metrics, s.burnups, s.deps, s.periods, s.sync.jiraConfigured]);
   const room = s.room;
 
   useEffect(() => {

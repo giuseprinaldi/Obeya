@@ -3,10 +3,13 @@ import { useId, useState } from "react";
 import { MAX_CARDS_MAX, MAX_CARDS_MIN, defaultBoardSource, hideableColumns } from "../../logic/board";
 import { defaultDisplay } from "../../logic/progress";
 import { PANEL_TYPES, SPANS, newPanel } from "../../logic/seed";
+import { BAR_STALE_DEFAULT, BAR_STALE_MAX, CARD_STALE_MAX } from "../../logic/stale";
 import { clamp, uid } from "../../logic/util";
 import { store } from "../../store";
 import { defaultBurnPeriod } from "../../logic/burnup";
-import type { AutoSource, BarDisplay, BoardResult, BoardSource, BurnPeriod, JiraBoard, JiraSource, Panel, PanelType, ProgressSort, Span, Wall } from "../../types";
+import { DEP_LIMIT_MAX, DEP_LIMIT_MIN, DEP_PRESETS, defaultDepSource } from "../../logic/deps";
+import { parseStatusList } from "../../logic/jira";
+import type { AutoSource, BarDisplay, BoardResult, BoardSource, BurnPeriod, DepSource,JiraBoard, JiraSource, Panel, PanelType, ProgressSort, Span, Wall } from "../../types";
 import { findPanel, wallById } from "../../ui";
 import { CheckField, Dialog, Segmented, SelectField, TextArea, TextField } from "../Dialog";
 import {
@@ -119,11 +122,18 @@ interface BoardDraft {
   hidden: string[];
   maxCards: string;
   doneDays: string;
+  staleDays: string;
 }
 
 function boardDraft(src: BoardSource | null | undefined): BoardDraft {
   const s = src ?? defaultBoardSource(0);
-  return { boardId: src ? s.boardId : null, jql: s.jql, sprint: s.sprint, hidden: s.hiddenColumns, maxCards: String(s.maxCards), doneDays: String(s.doneDays) };
+  return { boardId: src ? s.boardId : null, jql: s.jql, sprint: s.sprint, hidden: s.hiddenColumns, maxCards: String(s.maxCards), doneDays: String(s.doneDays), staleDays: String(s.staleDays) };
+}
+
+/** A stale threshold as typed: empty means off. Null when it is not a whole number of days from 0 to `max`. */
+function staleDaysOf(text: string, max: number): number | null {
+  const n = text.trim() === "" ? 0 : Math.round(Number(text));
+  return Number.isFinite(n) && n >= 0 && n <= max ? n : null;
 }
 
 /** The source a draft describes, or a message saying what is missing. */
@@ -133,7 +143,9 @@ function boardOf(d: BoardDraft): BoardSource | string {
   if (!Number.isFinite(maxCards) || maxCards < MAX_CARDS_MIN || maxCards > MAX_CARDS_MAX) return `Cards per column must be between ${MAX_CARDS_MIN} and ${MAX_CARDS_MAX}.`;
   const doneDays = d.doneDays.trim() === "" ? 0 : Math.round(Number(d.doneDays));
   if (!Number.isFinite(doneDays) || doneDays < 0) return "The number of days for the done column must be 0 or more.";
-  return { boardId: d.boardId, jql: d.jql.trim(), sprint: d.sprint, hiddenColumns: d.hidden, maxCards, doneDays };
+  const staleDays = staleDaysOf(d.staleDays, CARD_STALE_MAX);
+  if (staleDays === null) return `The number of days before a card is flagged must be between 0 and ${CARD_STALE_MAX}.`;
+  return { boardId: d.boardId, jql: d.jql.trim(), sprint: d.sprint, hiddenColumns: d.hidden, maxCards, doneDays, staleDays };
 }
 
 interface BoardFieldsProps {
@@ -169,6 +181,16 @@ function BoardFields({ value, onChange, boards, boardsError, last, checked, onCh
         <TextField label="Cards per column" type="number" min={MAX_CARDS_MIN} max={MAX_CARDS_MAX} step={1} value={value.maxCards} onChange={(maxCards) => onChange({ ...value, maxCards })} hint="The rest are counted as “+N more”." />
         <TextField label="Done column shows the last (days)" type="number" min={0} step={1} value={value.doneDays} onChange={(doneDays) => onChange({ ...value, doneDays })} hint="0 shows everything that is done." />
       </div>
+      <TextField
+        label="Flag cards not updated for (days)"
+        type="number"
+        min={0}
+        max={CARD_STALE_MAX}
+        step={1}
+        value={value.staleDays}
+        onChange={(staleDays) => onChange({ ...value, staleDays })}
+        hint="In-progress cards only. 0 switches it off."
+      />
       <fieldset className="field" style={{ border: 0, margin: 0, padding: 0 }}>
         <legend className="legend" style={{ padding: 0, marginBottom: 5 }}>
           Columns to hide
@@ -234,6 +256,20 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
   const [auto, setAuto] = useState<AutoDraft>(() => ({ on: !!pd?.auto, jql: pd?.auto?.jql ?? "", limit: String(pd?.auto?.limit ?? 12), ...optionsDraft(pd?.auto) }));
   const [autoDisplay, setAutoDisplay] = useState<BarDisplay>(() => pd?.autoDisplay ?? defaultDisplay());
   const [showTrend, setShowTrend] = useState(pd?.showTrend ?? true);
+  const [barStaleDays, setBarStaleDays] = useState(String(pd?.staleDays ?? BAR_STALE_DEFAULT));
+  const depSource = panel.type === "dependencies" ? panel.data.source : null;
+  const [dep, setDep] = useState(() => {
+    const s = depSource ?? defaultDepSource();
+    return { jql: s.jql, linkTypes: s.linkTypes.join(", "), showDone: s.showDone, limit: String(s.limit) };
+  });
+  /** The source the form describes, null when the query is empty, or a message saying what is wrong. */
+  const depOf = (): DepSource | string | null => {
+    const jql = dep.jql.trim();
+    if (!jql) return null;
+    const limit = Math.round(Number(dep.limit));
+    if (!Number.isFinite(limit) || limit < DEP_LIMIT_MIN || limit > DEP_LIMIT_MAX) return `Rows to show must be between ${DEP_LIMIT_MIN} and ${DEP_LIMIT_MAX}.`;
+    return { jql, linkTypes: parseStatusList(dep.linkTypes), showDone: dep.showDone, limit };
+  };
   const bd = panel.type === "burnup" ? panel.data : null;
   const [burnKind, setBurnKind] = useState<LinkKind>(bd?.source?.kind ?? "jql");
   const [burnLink, setBurnLink] = useState<LinkDraft>(() => linkDraft(bd?.source));
@@ -256,6 +292,7 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
     }
     let autoSource: AutoSource | null = null;
     if (panel.type === "progress") {
+      if (staleDaysOf(barStaleDays, BAR_STALE_MAX) === null) return `The number of days before a bar is flagged must be between 0 and ${BAR_STALE_MAX}.`;
       const a = autoOf(auto);
       if (typeof a === "string") return a;
       autoSource = a;
@@ -263,6 +300,13 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
         const problem = displayError(autoDisplay);
         if (problem) return problem;
       }
+    }
+    let depsSource: DepSource | null = null;
+    if (panel.type === "dependencies") {
+      // Left empty, the panel is saved without a query and says so on the wall.
+      const d = depOf();
+      if (typeof d === "string") return d;
+      depsSource = d;
     }
     let burnSource: JiraSource | null = null;
     if (panel.type === "burnup") {
@@ -296,10 +340,12 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
         p.data.sort = sort;
         p.data.showKeys = showKeys;
         p.data.showTrend = showTrend;
+        p.data.staleDays = staleDaysOf(barStaleDays, BAR_STALE_MAX) ?? BAR_STALE_DEFAULT;
         p.data.auto = autoSource;
         p.data.autoDisplay = autoDisplay;
       }
       if (p.type === "burnup") p.data = { source: burnSource, period: burnPeriod };
+      if (p.type === "dependencies") p.data = { source: depsSource };
     });
   };
 
@@ -314,7 +360,7 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
       title="Edit panel"
       onClose={onClose}
       onSubmit={save}
-      wide={panel.type === "progress" || panel.type === "kanban" || panel.type === "burnup"}
+      wide={panel.type === "progress" || panel.type === "kanban" || panel.type === "burnup" || panel.type === "dependencies"}
       danger={{ label: "Delete panel", onConfirm: removePanel }}
     >
       <div className="two">
@@ -352,6 +398,16 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
             onChange={setShowTrend}
             hint="A small line of the last 30 days and the change over the last week, for bars linked to Jira. It builds up a day at a time from when a bar is first linked."
           />
+          <TextField
+            label="Flag bars with no progress for (days)"
+            type="number"
+            min={0}
+            max={BAR_STALE_MAX}
+            step={1}
+            value={barStaleDays}
+            onChange={setBarStaleDays}
+            hint="For Jira-linked bars that have started and are not finished. It needs that many days of history to go on. 0 switches it off."
+          />
           <div className="dlg-section">
             <h4>Auto-fill from Jira</h4>
             <CheckField
@@ -376,6 +432,33 @@ export function PanelSettingsDialog({ panel, onClose }: { panel: Panel; onClose:
               </>
             ) : null}
           </div>
+        </>
+      ) : null}
+      {panel.type === "dependencies" ? (
+        <>
+          <JqlInput value={dep.jql} onChange={(jql) => setDep({ ...dep, jql })} label="Show the dependencies of these issues (JQL)" presets={DEP_PRESETS} placeholder='{PI_FIELD} = "{PI}"' />
+          <span className="hint">
+            Dependencies are read from the issue links in Jira: "is blocked by", "depends on" and links worded like them. A dependency shows even when only one of its two
+            issues matches the query. The panel is read-only; links are made and removed in Jira.
+          </span>
+          <TextField
+            label="Link types to read, optional"
+            value={dep.linkTypes}
+            onChange={(linkTypes) => setDep({ ...dep, linkTypes })}
+            placeholder="Leave empty to read every link that says blocks or depends on"
+            hint="Comma separated names of Jira link types, for example: Blocks, Dependency. The connection check under Jira lists the ones this Jira has."
+          />
+          <div className="two">
+            <TextField label="Rows to show" type="number" min={DEP_LIMIT_MIN} max={DEP_LIMIT_MAX} step={1} value={dep.limit} onChange={(limit) => setDep({ ...dep, limit })} hint="Work that is waiting now is listed first." />
+            <CheckField label="Also show settled dependencies" checked={dep.showDone} onChange={(showDone) => setDep({ ...dep, showDone })} hint="Settled means the issue waited on is done." />
+          </div>
+          <CheckLink
+            label="Check"
+            build={() => {
+              const d = depOf();
+              return typeof d === "string" ? d : d ? { deps: d } : "Enter the query whose dependencies to show.";
+            }}
+          />
         </>
       ) : null}
       {panel.type === "burnup" ? (

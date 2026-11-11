@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 
+from .deps import link_direction
 from .jira_client import JiraClient, JiraError, JiraUnavailable
 from .periods import clean_calendar, field_ref, pick_pis
 from .sources import text_values
@@ -293,6 +294,20 @@ def run_diagnostics(client: Optional[JiraClient], settings: dict, configured: bo
         return (WARN, "This Jira does not report when an issue last changed status category.",
                 "Cards will not show how many days they have been in their column. Nothing else is affected.")
     report.run("age", "Days in status on cards", age)
+
+    def links() -> tuple:
+        types = client.link_types()
+        if not types:
+            return (WARN, "This Jira has no issue link types, or issue linking is switched off.",
+                    "The dependencies panel reads issue links, so it will stay empty.")
+        reads = [str(t.get("name")) for t in types
+                 if link_direction(t.get("inward")) or link_direction(t.get("outward"))]
+        names = ", ".join(str(t.get("name")) for t in types)
+        if not reads:
+            return (WARN, f"None of the link types reads as a dependency ({names}).",
+                    "In the dependencies panel, name the link types your teams use for dependencies.")
+        return (PASS, f"Dependencies can be read from these link types: {', '.join(reads)}.")
+    report.run("links", "Dependency links", links)
 
     return report.result()
 

@@ -1,14 +1,15 @@
-/* Add or edit one item on a portfolio, problems, actions or flow board panel. KPIs have their own dialog. */
+/* Add or edit one item on a portfolio, problems, actions, risks or flow board panel. KPIs have their own dialog. */
 import { useState } from "react";
+import { ROAMS, ROAM_HINT } from "../../logic/deps";
 import { SEVERITIES, STAGES, itemNoun } from "../../logic/seed";
 import { clamp, dayOffset, uid } from "../../logic/util";
 import { store } from "../../store";
-import type { JiraSource, KanbanColumn, Panel, Room, Severity, Stage } from "../../types";
+import type { JiraSource, KanbanColumn, Panel, Roam, Room, Severity, Stage } from "../../types";
 import { findPanel } from "../../ui";
 import { CheckField, Dialog, Segmented, SelectField, TextArea, TextField } from "../Dialog";
 import { CheckLink, LinkFields, linkDraft, linkSource, type LinkDraft } from "./JiraFields";
 
-type ItemPanel = Exclude<Panel, { type: "statement" } | { type: "progress" } | { type: "kpi" } | { type: "burnup" }>;
+type ItemPanel = Exclude<Panel, { type: "statement" } | { type: "progress" } | { type: "kpi" } | { type: "burnup" } | { type: "dependencies" }>;
 type Vals = Record<string, string | boolean>;
 
 interface FieldDef {
@@ -45,6 +46,13 @@ const FIELDS: Record<ItemPanel["type"], FieldDef[]> = {
     { k: "due", l: "Due", t: "date", half: true },
     { k: "done", l: "Done", t: "checkbox" },
   ],
+  risks: [
+    { k: "title", l: "Risk", t: "text", ph: "What could go wrong" },
+    { k: "owner", l: "Owner", t: "text", half: true },
+    { k: "impact", l: "Impact if it happens", t: "select", o: SEVERITIES.map((s) => [s, s] as const), half: true },
+    { k: "roam", l: "Where it stands", t: "select", o: ROAMS.map((r) => [r, r] as const), hint: ROAM_HINT },
+    { k: "note", l: "What is being done about it", t: "textarea" },
+  ],
   kanban: [
     { k: "title", l: "Card", t: "text" },
     { k: "owner", l: "Owner", t: "text", half: true },
@@ -62,6 +70,8 @@ function defaults(panel: ItemPanel, col?: string): Record<string, unknown> {
       return { severity: "Medium", stage: "Define" };
     case "actions":
       return { due: dayOffset(7), done: false };
+    case "risks":
+      return { impact: "Medium", roam: "Open" };
     case "kanban":
       return { col: col || panel.data.columns[0]?.id || "", blocked: false };
   }
@@ -137,22 +147,33 @@ function apply(room: Room, panelId: string, itemId: string | undefined, v: Vals,
       put(p.data.cards, { title: text(v, "title"), owner: text(v, "owner"), tag: text(v, "tag"), col, blocked: flag(v, "blocked") });
       break;
     }
+    case "risks":
+      put(p.data.items, {
+        title: text(v, "title"),
+        owner: text(v, "owner"),
+        impact: pick<Severity>(v, "impact", SEVERITIES, "Medium"),
+        roam: pick<Roam>(v, "roam", ROAMS, "Open"),
+        note: text(v, "note"),
+      });
+      break;
     case "statement":
     case "progress":
     case "kpi":
     case "burnup":
+    case "dependencies":
       break;
   }
 }
 
 function remove(room: Room, panelId: string, itemId: string): void {
   const p = findPanel(room, panelId)?.panel;
-  if (!p || p.type === "statement" || p.type === "burnup") return;
+  if (!p || p.type === "statement" || p.type === "burnup" || p.type === "dependencies") return;
   if (p.type === "kanban") p.data.cards = p.data.cards.filter((x) => x.id !== itemId);
   else if (p.type === "kpi") p.data.items = p.data.items.filter((x) => x.id !== itemId);
   else if (p.type === "portfolio") p.data.items = p.data.items.filter((x) => x.id !== itemId);
   else if (p.type === "problems") p.data.items = p.data.items.filter((x) => x.id !== itemId);
   else if (p.type === "actions") p.data.items = p.data.items.filter((x) => x.id !== itemId);
+  else if (p.type === "risks") p.data.items = p.data.items.filter((x) => x.id !== itemId);
   else p.data.items = p.data.items.filter((x) => x.id !== itemId);
 }
 

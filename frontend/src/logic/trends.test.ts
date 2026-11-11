@@ -21,7 +21,7 @@ const periods = (over: Partial<Periods> = {}): Periods => ({
   ...over,
 });
 
-const live = (over: Partial<LiveData> = {}): LiveData => ({ progress: {}, auto: {}, boards: {}, metrics: {}, burnups: {}, periods: periods(), jiraConfigured: true, ...over });
+const live = (over: Partial<LiveData> = {}): LiveData => ({ progress: {}, auto: {}, boards: {}, metrics: {}, burnups: {}, deps: {}, periods: periods(), jiraConfigured: true, ...over });
 
 const result = (over: Partial<ProgressResult> = {}): ProgressResult => ({
   ok: true,
@@ -112,7 +112,7 @@ describe("bar trend", () => {
     expect(itemBar(manual, live({ progress })).trend).toBeNull();
     expect(itemBar(linked, live({ progress: { b1: result({ ok: false, error: "gone" }) } })).trend).toBeNull();
     expect(itemBar(linked, live({ progress: { b1: result({ total: 0, done: 0, history: [h(7, 0, 0)] }) } })).trend).toBeNull();
-    const panel: ProgressPanel = { id: "p1", type: "progress", title: "Bars", span: 3, data: { items: [], auto: { jql: "x", limit: 5, ...defaultJiraOptions() }, autoDisplay: defaultDisplay(), sort: "manual", showKeys: true, showTrend: true } };
+    const panel: ProgressPanel = { id: "p1", type: "progress", title: "Bars", span: 3, data: { items: [], auto: { jql: "x", limit: 5, ...defaultJiraOptions() }, autoDisplay: defaultDisplay(), sort: "manual", showKeys: true, showTrend: true, staleDays: 14 } };
     const auto = { p1: { ok: true, bars: [result({ key: "PLAT-2", history: [h(3, 35)] })], truncated: false, fetchedAt: "" } };
     expect(resolveBars(panel, live({ auto })).bars[0]!.trend).toMatchObject({ delta: 5, days: 3 });
   });

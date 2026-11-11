@@ -5,7 +5,8 @@ import { describeBoard } from "../../logic/board";
 import { JQL_HINT, JQL_PRESETS, parseIssueKey, parseStatusList } from "../../logic/jira";
 import { defaultJiraOptions } from "../../logic/progress";
 import { dayNumber, fmtNum } from "../../logic/util";
-import type { AutoResult, BarColor, BarDisplay, BurnPeriod, JiraBoard, JiraSource, JiraSourceOptions, Measure, MetricResult, Pace, PreviewRequest, ProgressResult, ValueFormat } from "../../types";
+import { depState } from "../../logic/deps";
+import type { AutoResult, BarColor, BarDisplay, BurnPeriod, DepsResult,JiraBoard, JiraSource, JiraSourceOptions, Measure, MetricResult, Pace, PreviewRequest, ProgressResult, ValueFormat } from "../../types";
 import { CheckField, SelectField, TextArea, TextField } from "../Dialog";
 
 /* ---------- Draft of a Jira link, as typed into the form ---------- */
@@ -163,10 +164,19 @@ function describeMetric(r: MetricResult): string {
   return `${fmtNum(r.value)}${r.unit ? ` ${r.unit}` : ""}${r.detail ? `: ${r.detail}` : "."}`;
 }
 
+function describeDeps(r: DepsResult): string {
+  const issues = `${r.scope} ${r.scope === 1 ? "issue" : "issues"}`;
+  if (!r.total) return `The query finds ${issues}, and none of their links reads as a dependency.`;
+  const open = r.deps.filter((d) => depState(d) !== "done").length;
+  const names = [...new Set(r.deps.map((d) => d.type).filter(Boolean))].join(", ");
+  return `The query finds ${issues} with ${r.total} ${r.total === 1 ? "dependency" : "dependencies"} between them or onto other work, ${open} still open${names ? `. Link types read: ${names}` : ""}.`;
+}
+
 /** One line for whatever a preview returned; which kind it is follows from what was asked. */
 function describeResult(asked: PreviewRequest, r: PreviewResult): string {
   if (asked.board && "columns" in r) return describeBoard(asked.board, r);
   if (asked.metric && "detail" in r) return describeMetric(r);
+  if (asked.deps && "deps" in r) return describeDeps(r);
   if ("bars" in r) return describeAuto(r);
   if ("done" in r) return describe(r);
   return "Jira answered, but not in a form this page understands.";

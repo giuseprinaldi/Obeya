@@ -3,6 +3,7 @@ import type {
   Access,
   AutoResult,
   BoardResult,
+  DepsResult,
   Diagnostics,
   JiraBoard,
   JiraField,
@@ -11,6 +12,8 @@ import type {
   PasscodeRequest,
   PreviewRequest,
   ProgressResult,
+  RoomHistory,
+  RoomVersion,
   SaveRoomConflict,
   SaveRoomRequest,
   SaveRoomResponse,
@@ -83,7 +86,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export type SaveOutcome = { kind: "saved"; version: number; updatedAt: string } | { kind: "conflict"; version: number; room: unknown };
 
 /** The answer to a preview: which one depends on what was asked. */
-export type PreviewResult = ProgressResult | AutoResult | BoardResult | MetricResult;
+export type PreviewResult = ProgressResult | AutoResult | BoardResult | MetricResult | DepsResult;
 
 export const api = {
   getState: (): Promise<ServerState> => request<ServerState>("GET", "/api/state"),
@@ -100,6 +103,11 @@ export const api = {
       throw e;
     }
   },
+
+  /** The saved versions the server still keeps, newest first. */
+  roomHistory: (): Promise<RoomHistory> => request<RoomHistory>("GET", "/api/room/history"),
+  /** One saved version, to restore it. 404 when it is no longer kept. */
+  roomVersion: (version: number): Promise<RoomVersion> => request<RoomVersion>("GET", `/api/room/history?version=${encodeURIComponent(version)}`),
 
   getSettings: (): Promise<Settings> => request<Settings>("GET", "/api/settings"),
   saveSettings: (s: Settings): Promise<Settings> => request<Settings>("PUT", "/api/settings", s),

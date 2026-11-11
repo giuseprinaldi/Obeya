@@ -149,6 +149,8 @@ a.card.jira:hover{border-color:var(--accent)}
 .card .age{font:500 10.5px var(--mono);color:var(--muted)}
 .col-more{font-size:12px;color:var(--muted);padding:1px 2px 0}
 .board-foot{margin:8px 0 0;font:500 10.5px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+/* new: stale items (an in-progress card nobody has updated for the board's threshold) */
+.card .stale{font:600 10.5px var(--mono);text-transform:uppercase;color:var(--warn);background:var(--warn-bg);border-radius:3px;padding:1px 5px}
 
 /* Rows (actions, problems, portfolio) */
 .rows{display:flex;flex-direction:column}
@@ -257,6 +259,28 @@ a.key:hover{color:var(--accent);border-color:var(--accent)}
 .k.ideal{border-top:1.5px dashed var(--muted)}
 .k.forecast{border-top:2px dotted var(--bc)}
 
+/* new: Dependencies (who waits on whom, from Jira's issue links) and the risk register */
+.deps{display:grid;grid-template-columns:auto minmax(0,1fr) auto minmax(0,1fr) auto;column-gap:12px}
+.dep{display:grid;grid-column:1 / -1;grid-template-columns:subgrid;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.dep:last-child{border-bottom:0}
+.dep .pill{justify-self:start}
+.dep-end{min-width:0}
+.dep-title{display:flex;align-items:baseline;gap:7px;min-width:0}
+.dep-title .key{margin-left:0;flex:none}
+.dep-title .rt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dep-arrow{font:500 10.5px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+.dep.st-good .rt{color:var(--muted)}
+@container (max-width:560px){
+  .deps{grid-template-columns:minmax(0,1fr) auto}
+  .dep{grid-template-columns:subgrid;row-gap:3px}
+  .dep .pill{grid-column:1}
+  .dep .tag{grid-column:2;grid-row:1;justify-self:end}
+  .dep-end,.dep-arrow{grid-column:1 / -1}
+}
+.risks .row{grid-template-columns:4px minmax(0,1fr) auto;align-items:stretch}
+.risks .pill{align-self:center}
+.tv-grid .dep .rt,.tv-grid .risks .rt{font-size:15.5px}
+
 /* Overview */
 .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:22px}
 .stat{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--st);border-radius:var(--radius);padding:11px 13px}
@@ -344,6 +368,14 @@ dialog::backdrop{background:rgba(8,12,18,.55)}
 .edit-row.head{font-size:11.5px;color:var(--muted)}
 .current-tag{font:600 10.5px var(--mono);text-transform:uppercase;letter-spacing:.05em;color:var(--good)}
 .status-line{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px}
+/* new: earlier versions */
+.versions{list-style:none;margin:0;padding:0;display:grid}
+.version{display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.version:last-child{border-bottom:0}
+.version-text{flex:1;min-width:0;display:grid;gap:2px}
+.version-when{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;font-weight:500}
+.version-changes{margin:3px 0 0;padding-left:17px;font-size:13px}
+.version .btn{flex:none}
 /* new: Jira connection check */
 .checks{list-style:none;margin:0;padding:0;display:grid}
 .check-row{display:grid;grid-template-columns:86px minmax(0,1fr);gap:4px 12px;align-items:start;padding:9px 0;border-bottom:1px solid var(--line)}

@@ -261,6 +261,29 @@ class FlowEngine(unittest.TestCase):
         self.assertIsInstance(card["ageDays"], int)
         self.assertGreaterEqual(card["ageDays"], 0)
 
+    def test_cards_say_whether_work_is_under_way_and_how_long_since_it_was_touched(self):
+        r = self.engine().compute(normalize_board({"boardId": 1}))
+        now = datetime.now(timezone.utc)
+        seen = 0
+        for column in r["columns"]:
+            for card in column["cards"]:
+                issue = self.ds.by_key(card["key"])
+                self.assertEqual(card["category"], STATUSES[issue["status"]], card["key"])
+                # Whole days since Jira's "updated"; a second either side of midnight is allowed for.
+                expected = (now - self.ds.updated(issue)).days
+                self.assertIn(card["idleDays"], (expected, expected - 1, expected + 1), card["key"])
+                self.assertGreaterEqual(card["idleDays"], 0)
+                seen += 1
+        self.assertGreater(seen, 5)
+        doing = next(c for c in r["columns"] if c["name"] == "In Progress")
+        self.assertTrue(all(c["category"] == "indeterminate" for c in doing["cards"]))
+        # The flagged story was touched when it was flagged, two days before the fake Jira's "today",
+        # if not since. That "today" is the local date, which in the evening west of Greenwich is a
+        # day behind the UTC clock the engine counts from, hence three.
+        flagged = next(i for i in self.ds.issues if i["flagged"])
+        card = next(c for col in r["columns"] for c in col["cards"] if c["key"] == flagged["key"])
+        self.assertLessEqual(card["idleDays"], 3)
+
     def test_privacy_switches_keep_names_and_summaries_on_the_server(self):
         r = self.engine(showSummaries=False, showAssignees=False).compute(normalize_board({"boardId": 1}))
         for col in r["columns"]:

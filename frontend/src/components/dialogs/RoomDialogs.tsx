@@ -6,7 +6,7 @@ import { ACCENTS, LIBRARY, TEMPLATES, buildWall, seed } from "../../logic/seed";
 import { uid } from "../../logic/util";
 import { store, useStore } from "../../store";
 import type { AccentKey, Room, Theme, Wall } from "../../types";
-import { go } from "../../ui";
+import { go, useUi } from "../../ui";
 import { Dialog, SelectField, TextArea, TextField } from "../Dialog";
 import { PasscodeSection } from "./AccessDialogs";
 
@@ -98,6 +98,7 @@ export function CustomizeDialog({ room, onClose }: { room: Room; onClose: () => 
   const [msg, setMsg] = useState("");
   const accentName = useId();
   const { access } = useStore();
+  const ui = useUi();
 
   const save = (): void => {
     store.commit(
@@ -211,6 +212,15 @@ export function CustomizeDialog({ room, onClose }: { room: Room; onClose: () => 
           </span>
         </div>
         <span className="hint">Backups from the earlier single-file prototype can be imported too.</span>
+      </div>
+      <div className="dlg-section">
+        <h4>Earlier versions</h4>
+        <div className="btn-row">
+          <button type="button" className="btn small" onClick={() => ui.open({ kind: "history" })}>
+            Earlier versions
+          </button>
+          <span className="hint">See what each of the last 100 saves changed, and go back to any of them. Changes typed above and not yet saved are dropped.</span>
+        </div>
       </div>
       <PasscodeSection access={access} />
     </Dialog>

@@ -18,11 +18,13 @@ A configurable digital Obeya room for leadership and program management. Each wa
   - Portfolio: initiatives with health, progress and horizon; progress can come from Jira
   - Progress bars: Jira-linked or manual bars, with an optional pace marker and a trend showing how each bar moved over the last week
   - Burn-up chart: done against scope, day by day, across a PI, a sprint or chosen dates, with a forecast
+  - Dependencies: which issues are waiting on which, read from Jira's issue links, with work that is held up right now listed first
+  - Risks: a risk register with owner, impact and ROAM status (open, owned, accepted, mitigated, resolved)
   - Problem solving: problems moving through Define, Analyze, Countermeasure, Verify and Closed
   - Action tracker: owner, due date and done, with late actions flagged
   - Flow board: columns with WIP limits and drag-and-drop cards, or a live read-only view of a Jira board
 - **Display mode** (`#screen-N`): a dark theme that scales to fill the screen, with a clock, the current PI and sprint, and an "updated" stamp. Controls and the mouse cursor hide when the mouse is idle. The arrow keys switch walls and Escape exits. Screens can be set to rotate when there are fewer TVs than walls.
-- **Status encoding:** colored stripes and labels for KPIs off target, initiatives at risk, blocked work, columns over their WIP limit, high-severity problems, late actions, and bars and burn-up charts behind pace.
+- **Status encoding:** colored stripes and labels for KPIs off target, initiatives at risk, blocked work, work waiting on a dependency, high risks nobody owns, columns over their WIP limit, high-severity problems, late actions, bars and burn-up charts behind pace, and stale work (in-progress Jira cards nobody has updated, and started bars with no progress, each for a number of days you set per panel).
 - **Customize:** room name, accent color, separate themes for laptops and TVs, density, three room templates (Program, Leadership, Team delivery) and a JSON backup and import.
 
 ## Jira-linked progress
@@ -39,11 +41,19 @@ The server keeps one snapshot of every link per day. Bars use it to show a small
 
 A **burn-up chart** panel is linked the same way, to an issue or a query, and covers the current PI, the current sprint or dates you choose. It draws scope and done for each day, an even-pace line, and a forecast from the pace of the last two weeks. The days from before the chart was added are worked out once from Jira's issue histories, so the chart is filled in from the start.
 
+## Dependencies and risks
+
+The **Dependencies & risks** wall (in the Program room template, or under **+ Wall**) holds two panels:
+
+- **Dependencies** takes a Jira query and lists the dependencies of the issues it finds, from their issue links: "is blocked by", "depends on" and links worded like them. Each row reads "A waits on B". It is marked **Waiting now** when A is already in progress and B is not done, **Open** when A has not started, and **Settled** when B is done. Dependencies between two projects are tagged "Across teams". If your Jira uses its own link types, name them in the panel settings. The panel is read-only: links are made in Jira.
+- **Risks** is entered by hand, because a risk needs a person's judgement. A high-impact risk that nobody has taken turns the panel red; anything still open or owned keeps it amber.
+
 ## Jira flow boards and KPIs
 
 - **Flow boards.** Point a flow board at a Jira board and it shows that board's own columns, WIP limits and cards. A scrum board shows the active sprint, so it rolls over when the sprint does.
 - **KPIs.** A KPI can be worked out from Jira: cycle time, lead time, throughput, blocked days, scope done, work in progress, blocked items and unplanned work. You still set the target.
 - **Blocked.** What counts as blocked (the flag, a status, a label, an "is blocked by" link) is set once under **Jira** and used everywhere.
+- **Stale.** A card on a Jira board is flagged "Stale 9d" when it is in progress and nobody has updated the issue for 7 days; a Jira-linked bar says "No progress 16d" when it has started, is not finished and nothing more has been done for 14 days. Both numbers are set in the panel settings, and 0 switches the flag off.
 
 To keep sprint and PI changes hands-off:
 
@@ -54,6 +64,7 @@ To keep sprint and PI changes hands-off:
 ## Locking edits and setting up TVs
 
 - **Edit passcode.** Under **Customize** you can set a passcode. After that, TVs and visitors can look but not change anything, and editing needs the passcode once per browser. If it is forgotten, `python -m obeya reset-passcode` on the server removes it.
+- **Earlier versions.** The server keeps the last 100 saves of the room. **Customize** > **Earlier versions** lists them with what each one changed, and restores any of them. A restore is saved as a new version, so it can be undone the same way.
 - **Screen addresses.** Each TV opens `/#screen-1`, `/#screen-2` and so on. A TV follows its screen number, so reordering walls or loading a template changes what it shows without touching it.
 - **Jira connection check.** **Jira** > **Check the connection** tests the real Jira against everything the app relies on and says what to fix. `python -m obeya check` does the same from the server.
 
