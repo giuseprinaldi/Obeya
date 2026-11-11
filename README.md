@@ -4,7 +4,7 @@ A configurable digital Obeya room for leadership and program management. Each wa
 
 ## Status
 
-**Working build, not yet deployed.** The app runs locally as a React frontend and a small Python server that keeps its data in a SQLite file (Postgres is an option). Progress bars can be linked to Jira epics, initiatives and queries. It has been tested against a built-in fake Jira, not against a real one; see `docs/architecture.md` for what that leaves unchecked.
+**Working build, not yet deployed.** The app runs locally as a React frontend and a small Python server that keeps its data in a SQLite file (Postgres is an option). Progress bars can be linked to Jira epics, initiatives and queries. It has been tested against a built-in fake Jira, not against a real one; see `docs/architecture.md` for what that leaves unchecked. The next step, connecting it to the real Jira, is written up step by step in `AGENTS.md`.
 
 `prototype/index.html` is the original single-file prototype (browser storage only, no Jira). It is kept for reference.
 
@@ -101,6 +101,7 @@ cd frontend && npm test
 | `frontend/` | React app |
 | `backend/obeya/` | API server, Jira client, sync job |
 | `backend/fake_jira/` | Stand-in Jira for development and tests |
+| `AGENTS.md` | Step-by-step brief for connecting Obeya to the real Jira, written for a coding agent |
 | `docs/architecture.md` | API, data model, configuration, deployment and security notes |
 | `docs/jira-integration.md` | Jira discovery items and what is still to build |
 | `prototype/` | The original single-file prototype |

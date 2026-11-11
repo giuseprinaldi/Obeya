@@ -1,6 +1,6 @@
 # Architecture and handoff notes
 
-This is the reference for wiring Obeya into the VM. It covers what runs where, the API, the data model, configuration, and what has and has not been tested.
+This is the reference for wiring Obeya into the VM. It covers what runs where, the API, the data model, configuration, and what has and has not been tested. The steps for connecting it to the real Jira, and for checking each thing that has only been tried on the fake one, are in `AGENTS.md` at the top of the repository.
 
 ## Components
 
