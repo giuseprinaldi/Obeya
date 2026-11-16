@@ -115,6 +115,8 @@ The settings are entered once, under **Jira** in the app, or through the API. To
 
 ### 4. Point the room at real work
 
+If the Jira project is shared by several teams, read `docs/shared-jira-mapping.md` first: it covers team slices, what counts as done, and what the app cannot express yet.
+
 The room is one JSON document. It does not exist until a browser opens the app for the first time, which creates the example room; a headless browser is enough. That room is linked to things that only exist in the fake Jira, so these need changing:
 
 | Wall | Panel | In the room document | Example value to replace |

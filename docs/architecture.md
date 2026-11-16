@@ -251,5 +251,6 @@ Environment variables, or `backend/.env` (see `backend/.env.example`):
 ## Not built yet
 
 - GitLab metrics.
+- For shared, multi-team Jira projects (see `docs/shared-jira-mapping.md`): a room-wide list of statuses that are not delivered, a KPI that counts the issues matching a query, an estimate field per board or link, and per-person WIP limits.
 - Moving cards from Obeya. Jira boards are read-only here by design.
 - Per-user sign-in and a record of who changed what.
