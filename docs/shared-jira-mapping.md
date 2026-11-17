@@ -1,6 +1,6 @@
 # Mapping a shared Jira project onto the room
 
-Read this before step 4 of `AGENTS.md` when the Jira project is shared: several teams, a portfolio layer and support work all living under one project key. The example room assumes one tidy project per team. A shared project breaks that assumption in a few predictable ways, and each one produces numbers that look fine and are wrong.
+Read this before writing a setup file (`backend/setup.example.json`, loaded with `python -m obeya setup`) when the Jira project is shared: several teams, a portfolio layer and support work all living under one project key. The example room assumes one tidy project per team. A shared project breaks that assumption in a few predictable ways, and each one produces numbers that look fine and are wrong.
 
 All names here are made up (`PLAT`, "Cancelled"). The real values never go in this repository; see the last section.
 
@@ -45,7 +45,7 @@ Themes and initiatives usually run on their own workflow with their own statuses
 
 ## 6. What to collect, and where it goes
 
-Collect these with read-only calls and keep the answers in a private note, not in the repository.
+Collect these with read-only calls and keep the answers in a private note, not in the repository. Most of them end up in the setup file: one `teams` entry per team (board id, a query that names the team, the measure and estimate field), `settings` for the fields, the blocked rule and the statuses never counted, `portfolio.items` for the keys leadership watches, and `counts` for figures such as work with no team.
 
 | Collect | From | Goes in |
 |---|---|---|
@@ -64,7 +64,7 @@ Collect these with read-only calls and keep the answers in a private note, not i
 
 ## 7. What the app cannot express yet
 
-These came out of mapping a real shared project. Each has a workaround today and is listed under "Not built yet" in `architecture.md`.
+These came out of mapping a real shared project. The first is how flow boards work by design; the other two are listed under "Not built yet" in `architecture.md`.
 
 | Gap | Workaround today |
 |---|---|
@@ -74,4 +74,4 @@ These came out of mapping a real shared project. Each has a workaround today and
 
 ## 8. Keeping real values out of the repository
 
-Board ids, field ids, team names, status names, queries and the Jira address are all read from the real Jira, so the rule in `AGENTS.md` applies to them: they are entered in the app and stored in its database, and they are never committed. Keep the filled-in version of the table above in a private note. Before every commit, run `git status` and `git diff --staged` and look for anything that came from Jira.
+Board ids, field ids, team names, status names, queries and the Jira address are all read from the real Jira, so the rule in `AGENTS.md` applies to them: they are entered in the app or loaded from a setup file, stored in its database, and never committed. Keep the setup file and the filled-in version of the table above outside the repository. Before every commit, run `git status` and `git diff --staged` and look for anything that came from Jira.
