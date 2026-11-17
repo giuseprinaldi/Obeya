@@ -1,7 +1,7 @@
 /* Burn-up chart: done against scope, day by day, across a PI, a sprint or chosen dates.
    Turns the panel's settings plus the server's daily history into what gets drawn. */
 import type { BurnPeriod, BurnupPanel, Status } from "../types";
-import { UNIT, barStatus, expectedPct, missingReason, paceDates, type LiveData } from "./progress";
+import { barStatus, expectedPct, missingReason, paceDates, unitOf, type LiveData } from "./progress";
 import { addDays, clamp, dayNumber, fmtDate, fmtNum } from "./util";
 
 /** The forecast looks at the pace over this many days, and needs at least FORECAST_MIN of them. */
@@ -144,7 +144,7 @@ export function burnupView(panel: BurnupPanel, live: LiveData): BurnupView {
   const today = live.periods.today;
   const t = dayNumber(today) ?? e;
   const span = Math.max(1, e - s);
-  const unit = UNIT[r.unit] ?? "issues";
+  const unit = unitOf(r, panel.data.source);
 
   // The stored days inside the period, then today as the server sees it right now.
   const byDay = new Map<number, BurnPoint>();

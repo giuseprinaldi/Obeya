@@ -32,10 +32,11 @@ If the teams move work to a "Blocked" status instead of flagging it, name that s
 
 ## 4. Estimates differ by team
 
-The story points field is one setting for the whole room. On a shared project one team may estimate in points, another in hours, and a third not at all.
+The story points field is one setting for the whole room. On a shared project one team may estimate in points, another in hours in a field of its own, and a third not at all.
 
-- Use **points** only on walls whose team fills in the room's points field consistently. Check the share of stories with no estimate first; the result shows it as "unestimated".
-- Use **count** everywhere else.
+- Use **points** on walls whose team fills in the room's points field consistently. Check the share of stories with no estimate first; the result shows it as "unestimated".
+- For a team that estimates in **another number field**, measure by story points and pick that field under **Estimate field** on each of its bars, burn-ups and KPIs, with the unit to show ("hrs"). Cards on its flow board still show the room's story points.
+- Use **count** for a team that does not estimate.
 - Never sum points and hours on a leadership wall.
 
 ## 5. Portfolio levels
@@ -56,7 +57,7 @@ Collect these with read-only calls and keep the answers in a private note, not i
 | Each board's columns and the statuses in them | board configuration | Check against the done list; hidden columns |
 | Statuses that mean delivered, and the one that means cancelled | the connection check lists the Done category; the teams say which ones mean what | "Never counted" in Jira settings; "Statuses that count as done" on a link only where needed |
 | How blocked work is marked | ask the teams | "Blocked means" in Jira settings |
-| Which estimate each team uses | board configuration (`estimation`, scrum boards only), or ask the team | Points or count, per wall |
+| Which estimate each team uses, and the id of its field | board configuration (`estimation`, scrum boards only), or ask the team; `GET /api/jira/fields` for the id | Points, another estimate field, or count, per wall |
 | The team field and how much work leaves it empty | one search | Queries; a place for unassigned work |
 | PI names exactly as Jira spells them, with dates | `GET /api/jira/pi-values`, the calendar owner | PI calendar |
 | Initiative and epic keys leadership wants to watch | ask leadership | Portfolio bars |
@@ -68,7 +69,7 @@ These came out of mapping a real shared project. Each has a workaround today and
 | Gap | Workaround today |
 |---|---|
 | Flow boards take their last column from the Jira board, whatever statuses it holds. | Fix the column mapping in Jira, or hide the column on the wall. |
-| One estimate field for the whole room. A team that estimates in another field cannot use points. | Use count on that team's wall. |
+| Cards on a flow board show the room's story points, not a team's own estimate field. | None; bars, burn-ups and KPIs can use the team's field. |
 | WIP limits are per column, as Jira boards define them. A per-person limit cannot be checked. | None. |
 
 ## 8. Keeping real values out of the repository

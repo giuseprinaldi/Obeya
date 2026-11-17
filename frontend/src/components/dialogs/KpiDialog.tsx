@@ -7,7 +7,7 @@ import { store } from "../../store";
 import type { KpiItem, KpiPanel, Measure, Metric, MetricKind, UnplannedRule } from "../../types";
 import { findPanel } from "../../ui";
 import { Dialog, Segmented, SelectField, TextField } from "../Dialog";
-import { BoardPicker, CheckLink, JqlInput, useBoards } from "./JiraFields";
+import { BoardPicker, CheckLink, EstimateFields, JqlInput, useBoards } from "./JiraFields";
 
 type Source = "manual" | "jira";
 const SOURCES: readonly (readonly [Source, string])[] = [
@@ -47,6 +47,7 @@ interface MetricDraft {
   windowDays: string;
   stat: Metric["stat"];
   measure: Measure;
+  estimateField: string;
   doneStatuses: string;
   rule: Rule;
   ruleValues: string;
@@ -60,6 +61,7 @@ function draftOf(m: Metric): MetricDraft {
     windowDays: String(m.windowDays),
     stat: m.stat,
     measure: m.measure,
+    estimateField: m.estimateField ?? "",
     doneStatuses: m.doneStatuses.join(", "),
     rule: m.unplanned.rule,
     ruleValues: m.unplanned.rule === "added_after_start" ? "" : m.unplanned.values.join(", "),
@@ -79,6 +81,7 @@ function metricOf(d: MetricDraft): Metric {
     measure: d.measure,
     doneStatuses: parseStatusList(d.doneStatuses),
     unplanned: d.rule === "added_after_start" ? { rule: d.rule } : { rule: d.rule, values: parseStatusList(d.ruleValues) },
+    ...(METRICS[d.kind].measure && d.measure === "points" && d.estimateField ? { estimateField: d.estimateField } : {}),
   };
 }
 
@@ -217,6 +220,7 @@ export function KpiDialog({ panel, itemId, onClose }: { panel: KpiPanel; itemId?
               </div>
             ) : null}
             {info.measure ? <SelectField label="Measure by" value={metric.measure} onChange={(measure) => changeMetric({ measure })} options={MEASURES} /> : null}
+            {info.measure && metric.measure === "points" ? <EstimateFields field={metric.estimateField} onField={(estimateField) => changeMetric({ estimateField })} /> : null}
             {metric.kind === "unplanned" ? (
               <>
                 <SelectField

@@ -1,12 +1,12 @@
 /* Form parts shared by every editor that links something to Jira. */
-import { useEffect, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { api, errorText, type PreviewResult } from "../../api";
 import { describeBoard } from "../../logic/board";
 import { JQL_HINT, JQL_PRESETS, parseIssueKey, parseStatusList } from "../../logic/jira";
 import { defaultJiraOptions } from "../../logic/progress";
 import { dayNumber, fmtNum } from "../../logic/util";
 import { depState } from "../../logic/deps";
-import type { AutoResult, BarColor, BarDisplay, BurnPeriod, DepsResult,JiraBoard, JiraSource, JiraSourceOptions, Measure, MetricResult, Pace, PreviewRequest, ProgressResult, ValueFormat } from "../../types";
+import type { AutoResult, BarColor, BarDisplay, BurnPeriod, DepsResult, JiraBoard, JiraField, JiraSource, JiraSourceOptions, Measure, MetricResult, Pace, PreviewRequest, ProgressResult, ValueFormat } from "../../types";
 import { CheckField, SelectField, TextArea, TextField } from "../Dialog";
 
 /* ---------- Draft of a Jira link, as typed into the form ---------- */
@@ -16,6 +16,10 @@ export interface OptionsDraft {
   includeSubtasks: boolean;
   /** Comma separated, as typed. */
   doneStatuses: string;
+  /** The field to sum instead of the room's story points; "" = the room's. */
+  estimateField: string;
+  /** The unit shown with that field, as typed. */
+  estimateUnit: string;
 }
 
 export interface LinkDraft extends OptionsDraft {
@@ -29,11 +33,24 @@ export interface LinkDraft extends OptionsDraft {
 
 export function optionsDraft(o?: JiraSourceOptions | null): OptionsDraft {
   const v = o ?? defaultJiraOptions();
-  return { measure: v.measure, includeSubtasks: v.includeSubtasks, doneStatuses: v.doneStatuses.join(", ") };
+  return {
+    measure: v.measure,
+    includeSubtasks: v.includeSubtasks,
+    doneStatuses: v.doneStatuses.join(", "),
+    estimateField: v.estimateField ?? "",
+    estimateUnit: v.estimateUnit ?? "",
+  };
+}
+
+/** The link's own estimate field and unit. They are left out unless the link sums estimates and a field is picked. */
+export function estimateOf(d: Pick<OptionsDraft, "measure" | "estimateField" | "estimateUnit">): Pick<JiraSourceOptions, "estimateField" | "estimateUnit"> {
+  if (d.measure !== "points" || !d.estimateField) return {};
+  const unit = d.estimateUnit.trim();
+  return unit ? { estimateField: d.estimateField, estimateUnit: unit } : { estimateField: d.estimateField };
 }
 
 export function optionsOf(d: OptionsDraft): JiraSourceOptions {
-  return { measure: d.measure, includeSubtasks: d.includeSubtasks, doneStatuses: parseStatusList(d.doneStatuses) };
+  return { measure: d.measure, includeSubtasks: d.includeSubtasks, doneStatuses: parseStatusList(d.doneStatuses), ...estimateOf(d) };
 }
 
 export function linkDraft(src?: JiraSource | null): LinkDraft {
@@ -90,6 +107,65 @@ const MEASURES: readonly (readonly [Measure, string])[] = [
   ["points", "Story points"],
 ];
 
+/** Jira's custom fields, loaded once, for pickers. Empty while loading or when Jira cannot be reached. */
+export function useCustomFields(): JiraField[] {
+  const [fields, setFields] = useState<JiraField[]>([]);
+  useEffect(() => {
+    let live = true;
+    api.jiraFields().then((v) => live && setFields(Array.isArray(v) ? v.filter((f) => f.custom) : []), () => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+  return fields;
+}
+
+/** A select with a filter box above it, for long lists such as Jira's custom fields. */
+export function FieldPicker({ label, value, onChange, fields, emptyLabel, hint }: { label: string; value: string; onChange: (v: string) => void; fields: JiraField[]; emptyLabel: string; hint?: string }) {
+  const [filter, setFilter] = useState("");
+  const id = useId();
+  const shown = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const list = fields.filter((f) => f.id === value || !q || f.name.toLowerCase().includes(q) || f.id.toLowerCase().includes(q));
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, [fields, filter, value]);
+  const known = !value || fields.some((f) => f.id === value);
+  return (
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      <input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Type to filter the list" aria-label={`Filter ${label}`} />
+      <select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{emptyLabel}</option>
+        {known ? null : <option value={value}>{value}</option>}
+        {shown.map((f) => (
+          <option key={f.id} value={f.id}>
+            {f.name} ({f.id})
+          </option>
+        ))}
+      </select>
+      {hint ? <span className="hint">{hint}</span> : null}
+    </div>
+  );
+}
+
+/** For a link measured by estimate: which field holds the estimate, and the unit to show with it. */
+export function EstimateFields({ field, unit, onField, onUnit }: { field: string; unit?: string; onField: (v: string) => void; onUnit?: (v: string) => void }) {
+  const fields = useCustomFields();
+  return (
+    <div className={onUnit ? "two" : undefined}>
+      <FieldPicker
+        label="Estimate field"
+        value={field}
+        onChange={onField}
+        fields={fields}
+        emptyLabel="Story points (from Jira settings)"
+        hint="Pick another number field for a team that estimates in it, hours for example."
+      />
+      {onUnit && field ? <TextField label="Unit shown" value={unit ?? ""} onChange={onUnit} placeholder="hrs" hint="Shown beside the numbers in place of pts." /> : null}
+    </div>
+  );
+}
+
 export function OptionsFields<T extends OptionsDraft>({ value, onChange }: { value: T; onChange: (v: T) => void }) {
   return (
     <>
@@ -103,6 +179,14 @@ export function OptionsFields<T extends OptionsDraft>({ value, onChange }: { val
           hint="Comma separated, for example: Done, Released"
         />
       </div>
+      {value.measure === "points" ? (
+        <EstimateFields
+          field={value.estimateField}
+          unit={value.estimateUnit}
+          onField={(estimateField) => onChange({ ...value, estimateField })}
+          onUnit={(estimateUnit) => onChange({ ...value, estimateUnit })}
+        />
+      ) : null}
       <CheckField label="Count sub-tasks instead of their parent stories" checked={value.includeSubtasks} onChange={(includeSubtasks) => onChange({ ...value, includeSubtasks })} />
     </>
   );

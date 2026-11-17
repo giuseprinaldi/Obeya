@@ -180,10 +180,18 @@ export function missingReason(live: LiveData): { state: "loading" | "disconnecte
     : { state: "disconnected", message: "Jira is not connected" };
 }
 
+/** The unit to show beside a result: "issues", "pts", or the link's own unit when it sums another
+    estimate field ("" when that link names no unit, since "pts" would be wrong). */
+export function unitOf(r: Pick<ProgressResult, "unit">, link?: Pick<JiraSourceOptions, "estimateField" | "estimateUnit"> | null): string {
+  if (r.unit === "points" && link?.estimateField) return link.estimateUnit?.trim() ?? "";
+  return UNIT[r.unit] ?? "issues";
+}
+
 function fromResult(
   base: Pick<BarView, "id" | "itemId" | "label" | "keyText" | "url" | "owner" | "note" | "display">,
   r: ProgressResult,
   periods: Periods,
+  link?: Pick<JiraSourceOptions, "estimateField" | "estimateUnit"> | null,
 ): BarView {
   if (!r.ok) return unavailable(base, "error", r.error || "Jira could not read this link.");
   return measured(
@@ -192,7 +200,7 @@ function fromResult(
       done: r.done,
       total: r.total,
       inProgress: r.inProgress,
-      unit: UNIT[r.unit] ?? "issues",
+      unit: unitOf(r, link),
       unestimated: r.unit === "points" ? r.unestimated : 0,
       emptyText: r.unit === "points" ? "No estimates yet" : "No issues yet",
       history: r.history,
@@ -224,7 +232,7 @@ export function itemBar(item: ProgressBarItem, live: LiveData): BarView {
     const m = missingReason(live);
     return unavailable(base, m.state, m.message);
   }
-  return fromResult(base, r, live.periods);
+  return fromResult(base, r, live.periods, src);
 }
 
 const STATUS_ORDER: Record<Status, number> = { bad: 0, warn: 1, none: 2, good: 3 };
@@ -277,7 +285,7 @@ export function resolveBars(panel: ProgressPanel, live: LiveData): PanelBars {
           note: "",
           display: displayOf(d.autoDisplay),
         };
-        bars.push(fromResult(base, r, live.periods));
+        bars.push(fromResult(base, r, live.periods, d.auto));
       });
       if (res.truncated) autoNote = `Showing the first ${res.bars.length} matches. Raise the limit in the panel settings to see more.`;
       else if (!res.bars.length) autoNote = "The Jira query for this panel matches nothing right now.";

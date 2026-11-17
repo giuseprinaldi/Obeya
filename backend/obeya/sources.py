@@ -14,6 +14,7 @@ from .periods import TemplateError, resolve_jql, sprint_period
 from .progress import empty_totals, issue_view, tally, work_items
 
 KEY_RE = re.compile(r"[A-Z][A-Z0-9_]*-\d+")
+FIELD_ID_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,59}")   # a Jira field id, such as customfield_10106
 MAX_DEPTH = 4          # initiative -> epic -> story -> sub-task, with one level spare
 MAX_ISSUES = 5000      # per source; protects Jira and the sync from a runaway link
 CHUNK = 40             # parent keys per "in (...)" query
@@ -54,13 +55,22 @@ def _options(raw: dict) -> dict:
     }
 
 
+def _with_estimate(spec: dict, raw: dict) -> dict:
+    """Add the link's own estimate field. It is only there when it is set and the link sums
+    estimates, so links saved before the option existed keep their id, and with it their history."""
+    field = str(raw.get("estimateField") or "").strip()
+    if spec.get("measure") == "points" and FIELD_ID_RE.fullmatch(field):
+        spec["estimateField"] = field
+    return spec
+
+
 def normalize_source(raw: Any) -> Optional[dict]:
     """Validate a Source from the room document. None = not a Jira link."""
     if not isinstance(raw, dict):
         return None
     if raw.get("kind") == "issue":
         key = normalize_key(raw.get("key"))
-        return {"kind": "issue", "key": key, **_options(raw)} if key else None
+        return _with_estimate({"kind": "issue", "key": key, **_options(raw)}, raw) if key else None
     if raw.get("kind") == "jql":
         jql = str(raw.get("jql") or "").strip()
         if not jql:
@@ -70,7 +80,7 @@ def normalize_source(raw: Any) -> Optional[dict]:
         # their id, and with it their history.
         if raw.get("descend") is True:
             spec["descend"] = True
-        return spec
+        return _with_estimate(spec, raw)
     return None
 
 
@@ -84,7 +94,7 @@ def normalize_auto(raw: Any) -> Optional[dict]:
         limit = int(raw.get("limit") or 12)
     except (TypeError, ValueError):
         limit = 12
-    return {"kind": "auto", "jql": jql[:4000], "limit": max(1, min(100, limit)), **_options(raw)}
+    return _with_estimate({"kind": "auto", "jql": jql[:4000], "limit": max(1, min(100, limit)), **_options(raw)}, raw)
 
 
 def _int(value: Any, default: int, lo: int, hi: int) -> int:
@@ -143,6 +153,7 @@ def normalize_metric(raw: Any) -> Optional[dict]:
         spec["stat"] = raw.get("stat") if raw.get("stat") in STAT_LABEL else "median"
     if kind in ("scope_done", "wip", "unplanned"):
         spec["measure"] = options["measure"]
+        _with_estimate(spec, raw)
     if kind == "unplanned":
         rule = raw.get("unplanned") if isinstance(raw.get("unplanned"), dict) else {}
         if rule.get("rule") in ("labels", "types"):
@@ -246,6 +257,20 @@ class Engine:
         except JiraError as err:
             return self._failed(spec, f"Jira could not run this: {err}")
 
+    # ---- the estimate a link sums ----
+
+    def _estimate(self, spec: dict) -> str:
+        """The field this link sums when it measures by estimate: its own, or the room's story points."""
+        field = str(spec.get("estimateField") or "")
+        if not field:
+            return self.points_field
+        if field not in {str(f.get("id")) for f in self.client.fields()}:
+            raise SourceError(f"The estimate field {field} does not exist in this Jira. Pick it again in the link's settings.")
+        return field
+
+    def _fields_with(self, base: list[str], estimate: str) -> list[str]:
+        return base if not estimate or estimate in base else base + [estimate]
+
     # ---- statuses that are never counted ----
 
     def _counted(self, items: list[dict]) -> list[dict]:
@@ -272,7 +297,8 @@ class Engine:
         """
         if last < first:
             return []
-        fields = ["status", "issuetype", "created"] + ([self.points_field] if self.points_field else [])
+        estimate = self._estimate(spec)
+        fields = ["status", "issuetype", "created"] + ([estimate] if estimate else [])
         if spec["kind"] == "jql" and not spec.get("descend"):
             jql = resolve_jql(spec["jql"], self.pi_field, self.pis, self.today)
             raw, truncated = self.client.search(jql, fields, limit=JQL_LIMIT, changelog=True)
@@ -283,8 +309,8 @@ class Engine:
         elif spec["kind"] in ("issue", "jql"):
             # The work sits below what the link names, so find it first, then read its histories.
             if spec["kind"] == "issue":
-                root = self._root(spec["key"])
-                items = self._counted(work_items(root, self._descend([root], spec["includeSubtasks"])))
+                root = self._root(spec["key"], estimate)
+                items = self._counted(work_items(root, self._descend([root], spec["includeSubtasks"], estimate)))
             else:
                 items = self._jql_items(spec)
             keys = [i["key"] for i in items]
@@ -299,7 +325,7 @@ class Engine:
         by_points = spec["measure"] == "points"
         items = []
         for r in self._counted_raw(raw):
-            points = issue_view(r, self.points_field)["points"]
+            points = issue_view(r, estimate)["points"]
             items.append((flow.timeline(r, categories), float(points or 0) if by_points else 1.0))
         days = [first + timedelta(days=n) for n in range((last - first).days + 1)]
         # The end of a day is midnight in the server's own time zone, the same clock
@@ -308,20 +334,21 @@ class Engine:
         return [(day, done, total)
                 for day, (done, total) in zip(days, flow.burnup(items, moments, spec["doneStatuses"]))]
 
-    def _root(self, key: str) -> dict:
+    def _root(self, key: str, estimate: str) -> dict:
         try:
-            raw, _ = self.client.search(f"key = {key}", self._fields, limit=1)
+            raw, _ = self.client.search(f"key = {key}", self._fields_with(self._fields, estimate), limit=1)
         except JiraUnavailable:
             raise
         except JiraError:
             raw = []
         if not raw:
             raise SourceError(f"{key} was not found in Jira, or the Jira account cannot see it.")
-        return issue_view(raw[0], self.points_field)
+        return issue_view(raw[0], estimate)
 
     def _issue(self, spec: dict) -> dict:
-        root = self._root(spec["key"])
-        children = self._descend([root], spec["includeSubtasks"])
+        estimate = self._estimate(spec)
+        root = self._root(spec["key"], estimate)
+        children = self._descend([root], spec["includeSubtasks"], estimate)
         return self._bar(root, children, spec)
 
     def _jql(self, spec: dict) -> dict:
@@ -332,16 +359,17 @@ class Engine:
         """The issues a query link measures: its matches, or with "descend" the work
         under each match, found the same way as for an issue link. An issue reached
         from two matches (an epic and one of its own stories, say) counts once."""
+        estimate = self._estimate(spec)
         jql = resolve_jql(spec["jql"], self.pi_field, self.pis, self.today)
-        raw, truncated = self.client.search(jql, self._fields, limit=JQL_LIMIT)
+        raw, truncated = self.client.search(jql, self._fields_with(self._fields, estimate), limit=JQL_LIMIT)
         if truncated:
             raise SourceError(f"This query matches more than {JQL_LIMIT} issues. Narrow it down.")
-        items = [issue_view(r, self.points_field) for r in raw]
+        items = [issue_view(r, estimate) for r in raw]
         if not spec["includeSubtasks"]:
             items = [i for i in items if not i["subtask"]]
         if not spec.get("descend"):
             return self._counted(items)
-        children = self._descend(items, spec["includeSubtasks"])
+        children = self._descend(items, spec["includeSubtasks"], estimate)
         out: list[dict] = []
         seen: set[str] = set()
         for root in items:
@@ -352,10 +380,11 @@ class Engine:
         return self._counted(out)
 
     def _auto(self, spec: dict) -> dict:
+        estimate = self._estimate(spec)
         jql = resolve_jql(spec["jql"], self.pi_field, self.pis, self.today)
-        raw, truncated = self.client.search(jql, self._fields, limit=spec["limit"])
-        roots = [issue_view(r, self.points_field) for r in raw]
-        children = self._descend(roots, spec["includeSubtasks"])
+        raw, truncated = self.client.search(jql, self._fields_with(self._fields, estimate), limit=spec["limit"])
+        roots = [issue_view(r, estimate) for r in raw]
+        children = self._descend(roots, spec["includeSubtasks"], estimate)
         return {"ok": True, "bars": [self._bar(r, children, spec) for r in roots],
                 "truncated": truncated, "fetchedAt": _now()}
 
@@ -545,11 +574,12 @@ class Engine:
                 recent = f"(statusCategory != Done OR {recent})"
             jql = f"({jql}) AND {recent}" if jql else recent
         changelog = lookback or by_join_date
+        fields = self._fields_with(self._flow_fields(), self._estimate(spec))
         if spec["boardId"]:
-            raw, truncated = self.client.board_issues(spec["boardId"], jql, self._flow_fields(),
+            raw, truncated = self.client.board_issues(spec["boardId"], jql, fields,
                                                       limit=JQL_LIMIT, changelog=changelog)
         else:
-            raw, truncated = self.client.search(jql, self._flow_fields(), limit=JQL_LIMIT, changelog=changelog)
+            raw, truncated = self.client.search(jql, fields, limit=JQL_LIMIT, changelog=changelog)
         if truncated:
             raise SourceError(f"This scope covers more than {JQL_LIMIT} issues. Narrow it down.")
         raw = [r for r in raw if not ((r.get("fields") or {}).get("issuetype") or {}).get("subtask")]
@@ -604,7 +634,7 @@ class Engine:
     def _snapshot(self, spec: dict, raw: list[dict], sprint: Optional[dict]) -> dict:
         kind = spec["metric"]
         measure = spec.get("measure", "count")
-        views = [issue_view(r, self.points_field) for r in raw]
+        views = [issue_view(r, self._estimate(spec)) for r in raw]
         totals = tally(views, measure, spec["doneStatuses"])
         unit_word = "points" if measure == "points" else "issues"
         short = "pts" if measure == "points" else "items"
@@ -675,15 +705,16 @@ class Engine:
             out.append(("parent", "parent", "parent"))
         return [c for c in out if c[0] not in self._unsupported]
 
-    def _descend(self, roots: list[dict], include_subtasks: bool) -> dict[str, list[dict]]:
-        """Breadth-first walk below the roots. Returns parent key -> children."""
+    def _descend(self, roots: list[dict], include_subtasks: bool, estimate: str) -> dict[str, list[dict]]:
+        """Breadth-first walk below the roots. Returns parent key -> children. `estimate` is the
+        field read into each issue's points."""
         children: dict[str, list[dict]] = {}
         by_key = {r["key"]: r for r in roots}
         frontier = [r for r in roots if not r["subtask"]]
         for _ in range(MAX_DEPTH):
             if not frontier:
                 break
-            found = self._children_of(frontier, include_subtasks)
+            found = self._children_of(frontier, include_subtasks, estimate)
             nxt = []
             for parent, kids in found.items():
                 fresh = [k for k in kids if k["key"] != parent]
@@ -705,8 +736,9 @@ class Engine:
             frontier = nxt
         return children
 
-    def _children_of(self, parents: list[dict], include_subtasks: bool) -> dict[str, list[dict]]:
+    def _children_of(self, parents: list[dict], include_subtasks: bool, estimate: str) -> dict[str, list[dict]]:
         out: dict[str, list[dict]] = {}
+        fields = self._fields_with(self._fields, estimate)
         for name, jql_field, pointer_field in self._clauses(include_subtasks):
             size = 1 if name in self._one_by_one else CHUNK
             i = 0
@@ -714,7 +746,7 @@ class Engine:
                 chunk = parents[i:i + size]
                 keys = [p["key"] for p in chunk]
                 try:
-                    raw, _ = self.client.search(f"{jql_field} in ({', '.join(keys)})", self._fields, limit=MAX_ISSUES)
+                    raw, _ = self.client.search(f"{jql_field} in ({', '.join(keys)})", fields, limit=MAX_ISSUES)
                 except JiraUnavailable:
                     raise
                 except JiraError:
@@ -726,7 +758,7 @@ class Engine:
                 unresolved = False
                 batch: dict[str, list[dict]] = {}
                 for r in raw:
-                    view = issue_view(r, self.points_field)
+                    view = issue_view(r, estimate)
                     if view["subtask"] and not include_subtasks:
                         continue
                     parent = _pointer((r.get("fields") or {}).get(pointer_field), lookup)

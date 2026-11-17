@@ -28,7 +28,7 @@ import type {
 import { MAX_CARDS_MAX, MAX_CARDS_MIN } from "./board";
 import { DEP_LIMIT_MAX, DEP_LIMIT_MIN, ROAMS } from "./deps";
 import { parseIssueKey } from "./jira";
-import { METRIC_KINDS, WINDOW_MAX, WINDOW_MIN } from "./kpi";
+import { METRICS, METRIC_KINDS, WINDOW_MAX, WINDOW_MIN } from "./kpi";
 import { defaultDisplay } from "./progress";
 import { BAR_STALE_DEFAULT, BAR_STALE_MAX, CARD_STALE_DEFAULT, CARD_STALE_MAX, staleThreshold } from "./stale";
 import { clamp, uid } from "./util";
@@ -64,11 +64,24 @@ const span = (x: unknown): Span => {
   return n === 2 || n === 3 ? n : 1;
 };
 
+const FIELD_ID = /^[A-Za-z][A-Za-z0-9_]{0,59}$/;
+
+/** A link's own estimate field, kept only where it applies: the link sums estimates and the id looks like one. */
+function estimateField(o: Obj, measure: Measure): string {
+  const field = str(o.estimateField).trim();
+  return measure === "points" && FIELD_ID.test(field) ? field : "";
+}
+
 function jiraOptions(o: Obj): JiraSourceOptions {
+  const measure = oneOf(o.measure, MEASURES, "count");
+  const field = estimateField(o, measure);
+  const unit = field ? str(o.estimateUnit).trim().slice(0, 12) : "";
   return {
-    measure: oneOf(o.measure, MEASURES, "count"),
+    measure,
     includeSubtasks: o.includeSubtasks === true,
     doneStatuses: arr(o.doneStatuses).map((s) => str(s).trim()).filter(Boolean),
+    ...(field ? { estimateField: field } : {}),
+    ...(unit ? { estimateUnit: unit } : {}),
   };
 }
 
@@ -114,15 +127,18 @@ function metric(x: unknown): Metric | null {
   const boardId = x.boardId === null || x.boardId === undefined || isNaN(board) ? null : board;
   const jql = str(x.jql).trim();
   if (boardId === null && !jql) return null;
+  const measure = oneOf(x.measure, MEASURES, "count");
+  const field = METRICS[x.kind as MetricKind].measure ? estimateField(x, measure) : "";
   return {
     kind: x.kind as MetricKind,
     boardId,
     jql,
     windowDays: clamp(Math.round(num(x.windowDays, 30)), WINDOW_MIN, WINDOW_MAX),
     stat: oneOf(x.stat, ["median", "average", "p85"] as const, "median"),
-    measure: oneOf(x.measure, MEASURES, "count"),
+    measure,
     doneStatuses: strList(x.doneStatuses),
     unplanned: unplannedRule(x.unplanned),
+    ...(field ? { estimateField: field } : {}),
   };
 }
 

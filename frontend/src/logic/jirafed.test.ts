@@ -1,11 +1,11 @@
 /* Jira-fed KPIs and flow boards. */
 import { describe, expect, it } from "vitest";
-import type { BoardCard, BoardColumn, BoardResult, KanbanPanel, KpiItem, KpiPanel, Metric, MetricResult, Room } from "../types";
+import type { BoardCard, BoardColumn, BoardResult, KanbanPanel, KpiItem, KpiPanel, Metric, MetricResult, ProgressPanel, Room } from "../types";
 import { boardHeight, boardView, defaultBoardSource, describeBoard, hideableColumns } from "./board";
 import { withSettingsDefaults } from "./jira";
 import { METRICS, METRIC_KINDS, defaultMetric, effectiveKpi, metricError, metricUnit, relabel } from "./kpi";
 import { normalizeRoom } from "./normalize";
-import type { LiveData } from "./progress";
+import { unitOf, type LiveData } from "./progress";
 import { seed } from "./seed";
 import { badCount, chipList, panelStatus, signals } from "./status";
 import { tvRowWeights } from "./tvlayout";
@@ -334,6 +334,44 @@ describe("normalizeRoom with Jira-fed panels", () => {
   it("keeps a count of the issues a query matches", () => {
     const r = room([kpiPanel([{ id: "a", name: "No team", metric: { kind: "count", jql: " Team is EMPTY " } }])]);
     expect((r.walls[0]!.panels[0] as KpiPanel).data.items[0]!.metric).toMatchObject({ kind: "count", jql: "Team is EMPTY", boardId: null });
+  });
+  it("keeps a link's own estimate field only where it applies", () => {
+    const bar = (id: string, source: unknown): unknown => ({ id, label: "", owner: "", note: "", source });
+    const r = room([
+      {
+        id: "bars",
+        type: "progress",
+        title: "Bars",
+        data: {
+          items: [
+            bar("b1", { kind: "issue", key: "DATA-1", measure: "points", estimateField: " customfield_10108 ", estimateUnit: " hrs " }),
+            bar("b2", { kind: "issue", key: "DATA-2", measure: "count", estimateField: "customfield_10108", estimateUnit: "hrs" }),
+            bar("b3", { kind: "issue", key: "DATA-3", measure: "points", estimateField: "not a field" }),
+          ],
+          auto: { jql: "project = DATA", measure: "points", estimateField: "customfield_10108" },
+        },
+      },
+      kpiPanel([
+        { id: "a", name: "WIP", metric: { kind: "wip", jql: "project = DATA", measure: "points", estimateField: "customfield_10108" } },
+        { id: "b", name: "Throughput", metric: { kind: "throughput", jql: "project = DATA", measure: "points", estimateField: "customfield_10108" } },
+      ]),
+    ]);
+    const bars = (r.walls[0]!.panels[0] as ProgressPanel).data;
+    expect(bars.items[0]!.source).toMatchObject({ estimateField: "customfield_10108", estimateUnit: "hrs" });
+    expect(bars.items[1]!.source).not.toHaveProperty("estimateField");     // counting issues sums nothing
+    expect(bars.items[1]!.source).not.toHaveProperty("estimateUnit");
+    expect(bars.items[2]!.source).not.toHaveProperty("estimateField");     // not a field id
+    expect(bars.auto).toMatchObject({ estimateField: "customfield_10108" });
+    expect(bars.auto).not.toHaveProperty("estimateUnit");
+    const kpis = (r.walls[0]!.panels[1] as KpiPanel).data.items;
+    expect(kpis[0]!.metric).toMatchObject({ estimateField: "customfield_10108" });
+    expect(kpis[1]!.metric).not.toHaveProperty("estimateField");           // throughput sums nothing
+  });
+  it("shows a link's own unit when it sums another field", () => {
+    expect(unitOf({ unit: "points" })).toBe("pts");
+    expect(unitOf({ unit: "points" }, { estimateField: "customfield_10108", estimateUnit: "hrs" })).toBe("hrs");
+    expect(unitOf({ unit: "points" }, { estimateField: "customfield_10108" })).toBe("");      // "pts" would be wrong
+    expect(unitOf({ unit: "issues" }, { estimateField: "customfield_10108", estimateUnit: "hrs" })).toBe("issues");
   });
   it("drops a malformed metric and keeps the KPI", () => {
     const r = room([

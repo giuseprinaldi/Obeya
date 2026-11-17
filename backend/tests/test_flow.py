@@ -3,7 +3,7 @@ import threading
 import unittest
 from datetime import date, datetime, timedelta, timezone
 
-from fake_jira.data import RETIRED_EPIC, STATUSES, STATUS_IDS, status_json, stamp
+from fake_jira.data import ESTIMATE_HOURS, RETIRED_EPIC, STATUSES, STATUS_IDS, status_json, stamp
 from fake_jira.server import DEFAULT_TOKEN, make_fake_server, suggested_settings
 from obeya import flow
 from obeya.jira_client import JiraClient
@@ -418,6 +418,27 @@ class FlowEngine(unittest.TestCase):
         # Asked for no issues, Jira answers with none and the total, and so does the fake.
         page = self.client._request("POST", "/rest/api/2/search", body={"jql": "", "maxResults": 0})
         self.assertEqual((page["issues"], page["total"], page["maxResults"]), ([], len(self.ds.issues), 0))
+
+    def test_kpis_can_sum_another_estimate_field(self):
+        data = [i for i in self.ds.issues if i["project"] == "DATA" and i["type"] in ("Story", "Bug")
+                and i["status"] != "Cancelled"]
+        total = sum(i["hours"] or 0 for i in data)
+        done = sum(i["hours"] or 0 for i in data if i["status"] == "Done")
+        scope = "project = DATA AND issuetype in (Story, Bug)"
+        in_hours = {"jql": scope, "measure": "points", "estimateField": ESTIMATE_HOURS}
+        r = self.engine().compute(normalize_metric({"kind": "scope_done", **in_hours}))
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["value"], flow.percent(done, total))
+        wip = self.engine().compute(normalize_metric({"kind": "wip", **in_hours}))
+        self.assertEqual(wip["value"], sum(i["hours"] or 0 for i in data if i["status"] in ("In Progress", "In Review")))
+        self.assertGreater(wip["value"], 0)
+        # Kinds that sum nothing ignore the field, and so does a KPI that counts issues.
+        self.assertNotIn("estimateField", normalize_metric({"kind": "throughput", **in_hours}))
+        self.assertNotIn("estimateField", normalize_metric({"kind": "wip", "jql": scope, "estimateField": ESTIMATE_HOURS}))
+        bad = self.engine().compute(normalize_metric({"kind": "wip", "jql": scope, "measure": "points",
+                                                     "estimateField": "customfield_99999"}))
+        self.assertFalse(bad["ok"])
+        self.assertIn("customfield_99999 does not exist", bad["error"])
 
     def test_added_after_start_needs_a_sprint(self):
         for metric in ({"kind": "unplanned", "jql": "project = PLAT"}, {"kind": "unplanned", "boardId": 2}):

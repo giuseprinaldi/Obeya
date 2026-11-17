@@ -245,6 +245,8 @@ _GETTERS: dict[str, Callable[[dict], list]] = {
     d.SPRINT: _sprint_values,
     "story points": lambda i: [i["points"]],
     d.STORY_POINTS: lambda i: [i["points"]],
+    "estimate hours": lambda i: [i["hours"]],
+    d.ESTIMATE_HOURS: lambda i: [i["hours"]],
     "program increment": lambda i: [i["pi"]],
     d.PI_FIELD: lambda i: [i["pi"]],
     "earned value": lambda i: [],          # a field that exists but that nobody fills in

@@ -12,6 +12,7 @@ SPRINT = "customfield_10104"
 STORY_POINTS = "customfield_10106"
 FLAGGED = "customfield_10107"
 PI_FIELD = "customfield_10500"
+ESTIMATE_HOURS = "customfield_10108"   # the DATA team estimates in hours here, not in story points
 
 FIELDS = [
     {"id": "summary", "name": "Summary", "custom": False, "schema": {"type": "string", "system": "summary"}},
@@ -36,6 +37,8 @@ FIELDS = [
      "schema": {"type": "number", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:float", "customId": 10106}},
     {"id": FLAGGED, "name": "Flagged", "custom": True,
      "schema": {"type": "array", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:multicheckboxes", "customId": 10107}},
+    {"id": ESTIMATE_HOURS, "name": "Estimate Hours", "custom": True,
+     "schema": {"type": "number", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:float", "customId": 10108}},
     {"id": PI_FIELD, "name": "Program Increment", "custom": True,
      "schema": {"type": "option", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:select", "customId": 10500}},
     {"id": "customfield_10501", "name": "Earned Value", "custom": True,
@@ -132,7 +135,7 @@ class Dataset:
         self._numbers[project] = self._numbers.get(project, 0) + 1
         issue = {"id": str(self._ids), "key": f"{project}-{self._numbers[project]}", "project": project,
                  "type": itype, "summary": summary, "status": status, "epic": None, "parent_link": None,
-                 "parent": None, "points": None, "sprints": [], "pi": None,
+                 "parent": None, "points": None, "hours": None, "sprints": [], "pi": None,
                  "assignee": None, "labels": [], "blocked_by": [], "links": [], "flagged": False,
                  "created": self.now - timedelta(days=90), "history": [], "resolved": None}
         issue.update(extra)
@@ -272,6 +275,13 @@ class Dataset:
         if first and second:
             first["links"].append(("Relates", second["key"]))
 
+        # The DATA team estimates in hours. Worked out from each issue's number, without the random
+        # generator; every fifth story has no estimate yet.
+        for issue in self.issues:
+            if issue["project"] == "DATA" and issue["type"] in ("Story", "Bug"):
+                number = int(issue["key"].split("-")[1])
+                issue["hours"] = None if number % 5 == 0 else float((number % 4 + 1) * 4)
+
         # An epic that was wound down: one story delivered, two cancelled, one never started. The
         # cancelled ones sit in a status of the Done category, as they do in many real workflows.
         # Added last and without the random generator, so every key and value above stays as it was.
@@ -347,6 +357,7 @@ class Dataset:
             PARENT_LINK: issue["parent_link"],
             SPRINT: [{"id": s, "name": f"Sprint {s}"} for s in issue["sprints"]] or None,
             STORY_POINTS: issue["points"],
+            ESTIMATE_HOURS: issue["hours"],
             FLAGGED: [{"value": "Impediment", "id": "10000"}] if issue["flagged"] else None,
             PI_FIELD: {"value": issue["pi"], "id": "2" + issue["pi"][-1]} if issue["pi"] else None,
         }

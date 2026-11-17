@@ -19,6 +19,11 @@ export interface JiraSourceOptions {
   includeSubtasks: boolean;
   /** Status names that count as done. Empty = use Jira's "Done" status category. */
   doneStatuses: string[];
+  /** Only with measure "points": the id of the Jira field to sum instead of the room's story
+      points field, for a team that estimates in another field (hours, say). Absent = the room's. */
+  estimateField?: string;
+  /** Short unit shown beside the numbers when estimateField is set, such as "hrs". Display only. */
+  estimateUnit?: string;
 }
 
 /** A hand-entered bar with no Jira link. */
@@ -128,6 +133,8 @@ export interface Metric {
   stat: "median" | "average" | "p85";
   /** scope_done, wip and unplanned: count issues or sum story points. */
   measure: Measure;
+  /** With measure "points": the Jira field to sum instead of the room's story points field. */
+  estimateField?: string;
   /** Status names that count as done. Empty = the "Done" status category in Jira. Not used by "count". */
   doneStatuses: string[];
   unplanned: UnplannedRule;

@@ -8,6 +8,7 @@ import { store, useStore } from "../../store";
 import type { JiraBoard, JiraField, JiraStatus, Period, Settings } from "../../types";
 import { CheckField, Dialog, SelectField, TextField } from "../Dialog";
 import { ConnectionCheck } from "./ConnectionCheck";
+import { FieldPicker } from "./JiraFields";
 
 interface PiRow extends Period {
   /** Stable key for the row while it is edited. */
@@ -16,34 +17,6 @@ interface PiRow extends Period {
 
 let nextRid = 1;
 const row = (p: Period): PiRow => ({ rid: nextRid++, name: p.name, start: p.start, end: p.end });
-
-/** A select with a filter box above it, for long lists such as Jira's custom fields. */
-function FieldPicker({ label, value, onChange, fields, emptyLabel, hint }: { label: string; value: string; onChange: (v: string) => void; fields: JiraField[]; emptyLabel: string; hint?: string }) {
-  const [filter, setFilter] = useState("");
-  const id = useId();
-  const shown = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    const list = fields.filter((f) => f.id === value || !q || f.name.toLowerCase().includes(q) || f.id.toLowerCase().includes(q));
-    return list.sort((a, b) => a.name.localeCompare(b.name));
-  }, [fields, filter, value]);
-  const known = !value || fields.some((f) => f.id === value);
-  return (
-    <div className="field">
-      <label htmlFor={id}>{label}</label>
-      <input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Type to filter the list" aria-label={`Filter ${label}`} />
-      <select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">{emptyLabel}</option>
-        {known ? null : <option value={value}>{value}</option>}
-        {shown.map((f) => (
-          <option key={f.id} value={f.id}>
-            {f.name} ({f.id})
-          </option>
-        ))}
-      </select>
-      {hint ? <span className="hint">{hint}</span> : null}
-    </div>
-  );
-}
 
 function PiCalendar({ rows, onChange, today, suggestions }: { rows: PiRow[]; onChange: (r: PiRow[]) => void; today: string; suggestions: string[] }) {
   const listId = useId();

@@ -3,7 +3,7 @@ import threading
 import unittest
 from datetime import date, timedelta
 
-from fake_jira.data import PI_FIELD, RETIRED_EPIC, STORY_POINTS, Dataset
+from fake_jira.data import ESTIMATE_HOURS, PI_FIELD, RETIRED_EPIC, STORY_POINTS, Dataset
 from fake_jira.jql import JqlError, search
 from fake_jira.server import DEFAULT_TOKEN, make_fake_server, suggested_settings
 from obeya.jira_client import JiraClient, JiraError, JiraUnavailable
@@ -180,6 +180,53 @@ class EngineTests(unittest.TestCase):
             self.assertEqual({(done, total) for _, done, total in rows}, {(1, 2)}, source)
             rows = self.engine(notCounted=[]).daily_history(spec, first, TODAY)
             self.assertEqual({(done, total) for _, done, total in rows}, {(3, 4)}, source)
+
+    # The DATA team's stories carry hours in a field of their own; every fifth has none.
+
+    def hours(self, stories):
+        return (sum(s["hours"] or 0 for s in stories), sum(s["hours"] or 0 for s in stories if s["status"] == "Done"),
+                sum(1 for s in stories if s["hours"] is None))
+
+    def test_a_link_can_sum_another_estimate_field(self):
+        epics = [i["key"] for i in self.ds.issues if i["parent_link"] == "DATA-1"]
+        stories = [i for i in self.ds.issues if i["type"] in WORK and i["epic"] in epics]
+        total, done, missing = self.hours(stories)
+        self.assertGreater(done, 0)
+        self.assertGreater(missing, 0)
+        in_hours = {"measure": "points", "estimateField": ESTIMATE_HOURS}
+        r = self.engine().compute(normalize_source({"kind": "issue", "key": "DATA-1", **in_hours}))
+        self.assertTrue(r["ok"], r)
+        self.assertEqual((r["unit"], r["total"], r["done"], r["unestimated"]), ("points", total, done, missing))
+        # The same link without the field still sums the room's story points.
+        in_points = self.engine().compute(normalize_source({"kind": "issue", "key": "DATA-1", "measure": "points"}))
+        self.assertEqual(in_points["total"], self.expected(epics, "points")[0])
+        self.assertNotEqual(in_points["total"], total)
+        # Queries, with and without the work under each match, and auto-fill bars.
+        under = "issuetype in (Story, Bug) AND \"Epic Link\" in (" + ", ".join(epics) + ")"
+        flat = self.engine().compute(normalize_source({"kind": "jql", "jql": under, **in_hours}))
+        self.assertEqual((flat["total"], flat["done"]), (total, done))
+        deep = self.engine().compute(normalize_source({"kind": "jql", "jql": "key = DATA-1", "descend": True, **in_hours}))
+        self.assertEqual((deep["total"], deep["done"]), (total, done))
+        auto = self.engine().compute(normalize_auto({"jql": "key = DATA-1", **in_hours}))
+        self.assertEqual([(b["total"], b["done"]) for b in auto["bars"]], [(total, done)])
+        # The replayed days of a burn-up chart end on the same figures.
+        rows = self.engine().daily_history(normalize_source({"kind": "issue", "key": "DATA-1", **in_hours}),
+                                           TODAY - timedelta(days=3), TODAY)
+        self.assertEqual((rows[-1][1], rows[-1][2]), (done, total))
+
+    def test_estimate_field_must_exist_and_only_matters_for_estimates(self):
+        r = self.engine().compute(normalize_source(
+            {"kind": "issue", "key": "DATA-1", "measure": "points", "estimateField": "customfield_99999"}))
+        self.assertFalse(r["ok"])
+        self.assertIn("customfield_99999 does not exist", r["error"])
+        # Counting issues uses no estimate, so the field is dropped and the link keeps its identity.
+        counted = normalize_source({"kind": "issue", "key": "DATA-1", "estimateField": ESTIMATE_HOURS})
+        self.assertEqual(counted, normalize_source({"kind": "issue", "key": "DATA-1"}))
+        self.assertNotIn("estimateField", normalize_source({"kind": "issue", "key": "DATA-1", "measure": "points"}))
+        self.assertNotIn("estimateField", normalize_source(
+            {"kind": "issue", "key": "DATA-1", "measure": "points", "estimateField": "not a field; drop table"}))
+        self.assertEqual(normalize_auto({"jql": "key = DATA-1", "measure": "points",
+                                         "estimateField": f" {ESTIMATE_HOURS} "})["estimateField"], ESTIMATE_HOURS)
 
     def test_issue_not_found(self):
         r = self.engine().compute(normalize_source({"kind": "issue", "key": "NOPE-1"}))

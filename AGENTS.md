@@ -51,7 +51,7 @@ python -m unittest discover -s tests -t .
 python scripts/dev.py
 ```
 
-Requirements are Python 3.10+ and Node 20+. Expect 167 frontend and 193 backend tests to pass. `scripts/dev.py` serves the app on http://127.0.0.1:8787 against the fake Jira on port 8790. Open it once so you know what a working room looks like, then stop it.
+Requirements are Python 3.10+ and Node 20+. Expect 169 frontend and 196 backend tests to pass. `scripts/dev.py` serves the app on http://127.0.0.1:8787 against the fake Jira on port 8790. Open it once so you know what a working room looks like, then stop it.
 
 `scripts/dev.py` is for the demo only. It overrides the Jira address and token with the fake's and, on a new database, saves Jira settings that match the fake. **Do not use it for the real Jira, and do not reuse its database:** start step 2 with a fresh one (delete `backend/data/obeya.db*`, or set `DATABASE_URL` to another file).
 
