@@ -26,7 +26,7 @@ TV 2 (#tv-...)   ─┘            │  serves the React build and /api
 
 **What counts.** For a linked issue the server walks down the hierarchy: Parent Link (Advanced Roadmaps), Epic Link, and optionally sub-tasks; on Cloud, `parent`. Anything with children is replaced by its children, so an initiative is measured by the stories under its epics. Anything without children counts as itself, so an epic with no stories shows as one open item. A JQL bar measures exactly the issues the query matches, unless "Count the work under each match" is ticked: then each match is walked the same way as a linked issue, and work reached from two matches (an epic and one of its own stories, say) counts once. That is the way to measure a PI by story points when only the epics carry the PI field. The option is stored as `descend` on the link and is left out of the link's identity when it is off, so links saved before it existed keep their history.
 
-**Done.** By default, Jira's "Done" status category. A bar can instead name the statuses that count as done. Progress is by issue count or by story points.
+**Done.** By default, Jira's "Done" status category. A bar can instead name the statuses that count as done; an issue in a Done-category status that is not named then counts as in progress, not as removed. Progress is by issue count or by story points.
 
 **Sprints and PIs.** Queries can use Jira's own `openSprints()`. For PIs, queries can use `{PI}`, `{NEXT_PI}`, `{PREV_PI}` and `{PI_FIELD}`; the server fills them in from the PI calendar and the PI field chosen in Jira settings. When the date passes into the next PI, every bar that uses `{PI}` follows without anyone editing it. Pace markers use the active sprint of the chosen board and the dates in the PI calendar.
 
@@ -251,6 +251,6 @@ Environment variables, or `backend/.env` (see `backend/.env.example`):
 ## Not built yet
 
 - GitLab metrics.
-- For shared, multi-team Jira projects (see `docs/shared-jira-mapping.md`): a room-wide list of statuses that are not delivered, a KPI that counts the issues matching a query, an estimate field per board or link, and per-person WIP limits.
+- For shared, multi-team Jira projects (see `docs/shared-jira-mapping.md`): a room-wide list of statuses that are not delivered, leaving a status such as cancelled out of the work counted under a linked issue, a KPI that counts the issues matching a query, an estimate field per board or link, and per-person WIP limits.
 - Moving cards from Obeya. Jira boards are read-only here by design.
 - Per-user sign-in and a record of who changed what.
