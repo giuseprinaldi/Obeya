@@ -35,7 +35,9 @@ A progress bar can be linked three ways, all from the editor:
 - **A Jira query (JQL).** Progress is measured across the issues the query matches, for example `sprint in openSprints()`. Tick "Count the work under each match" and it measures what sits beneath them instead, so a query for the epics in the current PI is measured by their stories.
 - **Auto-fill.** A progress panel can take a query, and every issue it matches becomes its own bar, for example every epic in the current PI.
 
-Each bar chooses issue count or story points, which statuses count as done, its label, color, value format and pace marker.
+Each bar chooses issue count or story points, which statuses count as done, its label, color, value format and pace marker. A bar measured by estimate can sum another Jira field than the room's story points, for a team that estimates in hours.
+
+Statuses listed under **Never counted** in Jira settings are left out of every bar, chart and KPI. That is the place for a cancelled status that Jira keeps in its Done category, which would otherwise count as delivered.
 
 The server keeps one snapshot of every link per day. Bars use it to show a small trend line and the change over the last week ("+4 in 7d"), which can be switched off per panel.
 
@@ -51,7 +53,7 @@ The **Dependencies & risks** wall (in the Program room template, or under **+ Wa
 ## Jira flow boards and KPIs
 
 - **Flow boards.** Point a flow board at a Jira board and it shows that board's own columns, WIP limits and cards. A scrum board shows the active sprint, so it rolls over when the sprint does.
-- **KPIs.** A KPI can be worked out from Jira: cycle time, lead time, throughput, blocked days, scope done, work in progress, blocked items and unplanned work. You still set the target.
+- **KPIs.** A KPI can be worked out from Jira: cycle time, lead time, throughput, blocked days, scope done, work in progress, blocked items, unplanned work, and a plain count of the issues a query matches. You still set the target.
 - **Blocked.** What counts as blocked (the flag, a status, a label, an "is blocked by" link) is set once under **Jira** and used everywhere.
 - **Stale.** A card on a Jira board is flagged "Stale 9d" when it is in progress and nobody has updated the issue for 7 days; a Jira-linked bar says "No progress 16d" when it has started, is not finished and nothing more has been done for 14 days. Both numbers are set in the panel settings, and 0 switches the flag off.
 
@@ -67,6 +69,7 @@ To keep sprint and PI changes hands-off:
 - **Earlier versions.** The server keeps the last 100 saves of the room. **Customize** > **Earlier versions** lists them with what each one changed, and restores any of them. A restore is saved as a new version, so it can be undone the same way.
 - **Screen addresses.** Each TV opens `/#screen-1`, `/#screen-2` and so on. A TV follows its screen number, so reordering walls or loading a template changes what it shows without touching it.
 - **Jira connection check.** **Jira** > **Check the connection** tests the real Jira against everything the app relies on and says what to fix. `python -m obeya check` does the same from the server.
+- **Setup file.** `python -m obeya setup FILE` loads Jira settings and a wall per team from one JSON file, then prints PASS or FAIL for every link. `backend/setup.example.json` is an example. `python -m obeya verify` prints the same report for the room as it is. Both are described in `docs/architecture.md`.
 
 ## Running it locally
 

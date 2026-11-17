@@ -2,6 +2,9 @@
 
     python -m obeya                  start the server
     python -m obeya check            test the Jira connection and print what was found
+    python -m obeya setup FILE       load Jira settings and Jira-linked walls from a setup file, then verify
+                                     (add --dry-run to try every link and write nothing)
+    python -m obeya verify           sync, then print PASS or FAIL for every Jira link in the room
     python -m obeya reset-passcode   remove the edit passcode (when it has been forgotten)
 """
 from __future__ import annotations
@@ -27,6 +30,34 @@ def check() -> int:
     return 0 if result["ok"] else 1
 
 
+def _open():
+    cfg = load_config()
+    db = Database(cfg.database_url)
+    db.init_schema()
+    return db, Syncer(db, cfg)
+
+
+def verify() -> int:
+    """Sync once and say, link by link, whether the room shows real data. Exit code 1 if not."""
+    from .verify import run
+    code, text = run(*_open())
+    print(text)
+    return code
+
+
+def setup(args: list[str]) -> int:
+    """Load a setup file. Exit code 0 when every link works, 1 when one failed, 2 when the file was not used."""
+    from .roomsetup import run
+    files = [a for a in args if not a.startswith("--")]
+    flags = {a for a in args if a.startswith("--")}
+    if len(files) != 1 or flags - {"--dry-run"}:
+        print("Usage: python -m obeya setup FILE [--dry-run]")
+        return 2
+    code, text = run(*_open(), files[0], dry_run="--dry-run" in flags)
+    print(text)
+    return code
+
+
 def reset_passcode() -> int:
     from .access import AccessControl
     cfg = load_config()
@@ -44,6 +75,10 @@ def main() -> None:
         sys.exit(check())
     if command == "reset-passcode":
         sys.exit(reset_passcode())
+    if command == "verify":
+        sys.exit(verify())
+    if command == "setup":
+        sys.exit(setup(sys.argv[2:]))
     if command:
         print(__doc__)
         sys.exit(2)

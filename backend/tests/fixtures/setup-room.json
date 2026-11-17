@@ -1,0 +1,529 @@
+{
+ "accent": "cobalt",
+ "density": "comfortable",
+ "example": false,
+ "roomName": "Example program",
+ "rotate": 0,
+ "theme": "auto",
+ "tvTheme": "dark",
+ "v": 2,
+ "walls": [
+  {
+   "id": "setup-team-platform",
+   "name": "Platform",
+   "panels": [
+    {
+     "data": {
+      "items": [
+       {
+        "actual": "",
+        "dir": "up",
+        "history": [],
+        "id": "setup-team-platform-now-scope_done",
+        "metric": {
+         "boardId": 1,
+         "doneStatuses": [],
+         "jql": "",
+         "kind": "scope_done",
+         "measure": "points",
+         "stat": "median",
+         "unplanned": {
+          "rule": "added_after_start"
+         },
+         "windowDays": 30
+        },
+        "name": "Scope done",
+        "target": "",
+        "unit": "%"
+       },
+       {
+        "actual": "",
+        "dir": "down",
+        "history": [],
+        "id": "setup-team-platform-now-wip",
+        "metric": {
+         "boardId": 1,
+         "doneStatuses": [],
+         "jql": "",
+         "kind": "wip",
+         "measure": "points",
+         "stat": "median",
+         "unplanned": {
+          "rule": "added_after_start"
+         },
+         "windowDays": 30
+        },
+        "name": "Work in progress",
+        "target": "",
+        "unit": "pts"
+       },
+       {
+        "actual": "",
+        "dir": "down",
+        "history": [],
+        "id": "setup-team-platform-now-blocked_now",
+        "metric": {
+         "boardId": 1,
+         "doneStatuses": [],
+         "jql": "",
+         "kind": "blocked_now",
+         "measure": "count",
+         "stat": "median",
+         "unplanned": {
+          "rule": "added_after_start"
+         },
+         "windowDays": 30
+        },
+        "name": "Blocked items",
+        "target": "",
+        "unit": ""
+       },
+       {
+        "actual": "",
+        "dir": "down",
+        "history": [],
+        "id": "setup-team-platform-now-unplanned",
+        "metric": {
+         "boardId": 1,
+         "doneStatuses": [],
+         "jql": "",
+         "kind": "unplanned",
+         "measure": "points",
+         "stat": "median",
+         "unplanned": {
+          "rule": "added_after_start"
+         },
+         "windowDays": 30
+        },
+        "name": "Unplanned work",
+        "target": "",
+        "unit": "%"
+       }
+      ]
+     },
+     "id": "setup-team-platform-now",
+     "span": 2,
+     "title": "Sprint health",
+     "type": "kpi"
+    },
+    {
+     "data": {
+      "period": {
+       "kind": "sprint"
+      },
+      "source": {
+       "descend": false,
+       "doneStatuses": [],
+       "includeSubtasks": false,
+       "jql": "(project = PLAT) AND sprint in openSprints()",
+       "kind": "jql",
+       "measure": "points"
+      }
+     },
+     "id": "setup-team-platform-burnup",
+     "span": 1,
+     "title": "Sprint burn-up",
+     "type": "burnup"
+    },
+    {
+     "data": {
+      "items": [
+       {
+        "actual": "",
+        "dir": "down",
+        "history": [],
+        "id": "setup-team-platform-flow-cycle_time",
+        "metric": {
+         "boardId": 1,
+         "doneStatuses": [],
+         "jql": "",
+         "kind": "cycle_time",
+         "measure": "count",
+         "stat": "median",
+         "unplanned": {
+          "rule": "added_after_start"
+         },
+         "windowDays": 30
+        },
+        "name": "Cycle time",
+        "target": "",
+        "unit": "days"
+       },
+       {
+        "actual": "",
+        "dir": "up",
+        "history": [],
+        "id": "setup-team-platform-flow-throughput",
+        "metric": {
+         "boardId": 1,
+         "doneStatuses": [],
+         "jql": "",
+         "kind": "throughput",
+         "measure": "count",
+         "stat": "median",
+         "unplanned": {
+          "rule": "added_after_start"
+         },
+         "windowDays": 30
+        },
+        "name": "Throughput",
+        "target": "",
+        "unit": "/ week"
+       },
+       {
+        "actual": "",
+        "dir": "down",
+        "history": [],
+        "id": "setup-team-platform-flow-blocked_days",
+        "metric": {
+         "boardId": 1,
+         "doneStatuses": [],
+         "jql": "",
+         "kind": "blocked_days",
+         "measure": "count",
+         "stat": "median",
+         "unplanned": {
+          "rule": "added_after_start"
+         },
+         "windowDays": 30
+        },
+        "name": "Blocked days",
+        "target": "",
+        "unit": "days"
+       }
+      ]
+     },
+     "id": "setup-team-platform-flow",
+     "span": 3,
+     "title": "Flow, last 30 days",
+     "type": "kpi"
+    },
+    {
+     "data": {
+      "cards": [],
+      "columns": [
+       {
+        "id": "setup-team-platform-board-c1",
+        "name": "To do",
+        "wip": 0
+       }
+      ],
+      "jira": {
+       "boardId": 1,
+       "doneDays": 14,
+       "hiddenColumns": [],
+       "jql": "",
+       "maxCards": 6,
+       "sprint": "active",
+       "staleDays": 7
+      }
+     },
+     "id": "setup-team-platform-board",
+     "span": 3,
+     "title": "Board",
+     "type": "kanban"
+    }
+   ],
+   "subtitle": "Sprint flow and delivery"
+  },
+  {
+   "id": "setup-team-data",
+   "name": "Data",
+   "panels": [
+    {
+     "data": {
+      "items": [
+       {
+        "actual": "",
+        "dir": "down",
+        "history": [],
+        "id": "setup-team-data-now-wip",
+        "metric": {
+         "boardId": 2,
+         "doneStatuses": [],
+         "estimateField": "customfield_10108",
+         "jql": "",
+         "kind": "wip",
+         "measure": "points",
+         "stat": "median",
+         "unplanned": {
+          "rule": "added_after_start"
+         },
+         "windowDays": 30
+        },
+        "name": "Work in progress",
+        "target": "",
+        "unit": "hrs"
+       },
+       {
+        "actual": "",
+        "dir": "down",
+        "history": [],
+        "id": "setup-team-data-now-blocked_now",
+        "metric": {
+         "boardId": 2,
+         "doneStatuses": [],
+         "jql": "",
+         "kind": "blocked_now",
+         "measure": "count",
+         "stat": "median",
+         "unplanned": {
+          "rule": "added_after_start"
+         },
+         "windowDays": 30
+        },
+        "name": "Blocked items",
+        "target": "",
+        "unit": ""
+       }
+      ]
+     },
+     "id": "setup-team-data-now",
+     "span": 1,
+     "title": "Right now",
+     "type": "kpi"
+    },
+    {
+     "data": {
+      "items": [
+       {
+        "actual": "",
+        "dir": "down",
+        "history": [],
+        "id": "setup-team-data-flow-cycle_time",
+        "metric": {
+         "boardId": 2,
+         "doneStatuses": [],
+         "jql": "",
+         "kind": "cycle_time",
+         "measure": "count",
+         "stat": "median",
+         "unplanned": {
+          "rule": "added_after_start"
+         },
+         "windowDays": 30
+        },
+        "name": "Cycle time",
+        "target": "",
+        "unit": "days"
+       },
+       {
+        "actual": "",
+        "dir": "up",
+        "history": [],
+        "id": "setup-team-data-flow-throughput",
+        "metric": {
+         "boardId": 2,
+         "doneStatuses": [],
+         "jql": "",
+         "kind": "throughput",
+         "measure": "count",
+         "stat": "median",
+         "unplanned": {
+          "rule": "added_after_start"
+         },
+         "windowDays": 30
+        },
+        "name": "Throughput",
+        "target": "",
+        "unit": "/ week"
+       },
+       {
+        "actual": "",
+        "dir": "down",
+        "history": [],
+        "id": "setup-team-data-flow-blocked_days",
+        "metric": {
+         "boardId": 2,
+         "doneStatuses": [],
+         "jql": "",
+         "kind": "blocked_days",
+         "measure": "count",
+         "stat": "median",
+         "unplanned": {
+          "rule": "added_after_start"
+         },
+         "windowDays": 30
+        },
+        "name": "Blocked days",
+        "target": "",
+        "unit": "days"
+       }
+      ]
+     },
+     "id": "setup-team-data-flow",
+     "span": 2,
+     "title": "Flow, last 30 days",
+     "type": "kpi"
+    },
+    {
+     "data": {
+      "cards": [],
+      "columns": [
+       {
+        "id": "setup-team-data-board-c1",
+        "name": "To do",
+        "wip": 0
+       }
+      ],
+      "jira": {
+       "boardId": 2,
+       "doneDays": 14,
+       "hiddenColumns": [],
+       "jql": "status != Cancelled",
+       "maxCards": 6,
+       "sprint": "active",
+       "staleDays": 7
+      }
+     },
+     "id": "setup-team-data-board",
+     "span": 3,
+     "title": "Board",
+     "type": "kanban"
+    }
+   ],
+   "subtitle": "Flow and delivery"
+  },
+  {
+   "id": "setup-portfolio",
+   "name": "Portfolio",
+   "panels": [
+    {
+     "data": {
+      "auto": null,
+      "autoDisplay": {
+       "color": "status",
+       "pace": {
+        "kind": "none"
+       },
+       "showInProgress": true,
+       "valueFormat": "both"
+      },
+      "items": [
+       {
+        "color": "status",
+        "id": "setup-portfolio-bar-plat-1",
+        "label": "",
+        "note": "",
+        "owner": "",
+        "pace": {
+         "kind": "none"
+        },
+        "showInProgress": true,
+        "source": {
+         "doneStatuses": [],
+         "includeSubtasks": false,
+         "key": "PLAT-1",
+         "kind": "issue",
+         "measure": "count"
+        },
+        "valueFormat": "both"
+       },
+       {
+        "color": "status",
+        "id": "setup-portfolio-bar-data-1",
+        "label": "",
+        "note": "",
+        "owner": "",
+        "pace": {
+         "kind": "none"
+        },
+        "showInProgress": true,
+        "source": {
+         "doneStatuses": [],
+         "includeSubtasks": false,
+         "key": "DATA-1",
+         "kind": "issue",
+         "measure": "count"
+        },
+        "valueFormat": "both"
+       }
+      ],
+      "showKeys": true,
+      "showTrend": true,
+      "sort": "manual",
+      "staleDays": 14
+     },
+     "id": "setup-portfolio-bars",
+     "span": 3,
+     "title": "Initiatives and epics",
+     "type": "progress"
+    }
+   ],
+   "subtitle": "Progress of the work leadership follows"
+  },
+  {
+   "id": "setup-dependencies",
+   "name": "Dependencies and counts",
+   "panels": [
+    {
+     "data": {
+      "source": {
+       "jql": "project in (PLAT, DATA)",
+       "limit": 12,
+       "linkTypes": [],
+       "showDone": false
+      }
+     },
+     "id": "setup-dependencies-deps",
+     "span": 3,
+     "title": "Dependencies",
+     "type": "dependencies"
+    },
+    {
+     "data": {
+      "items": [
+       {
+        "actual": "",
+        "dir": "down",
+        "history": [],
+        "id": "setup-dependencies-counts-cancelled-work",
+        "metric": {
+         "boardId": null,
+         "doneStatuses": [],
+         "jql": "status = Cancelled",
+         "kind": "count",
+         "measure": "count",
+         "stat": "median",
+         "unplanned": {
+          "rule": "added_after_start"
+         },
+         "windowDays": 30
+        },
+        "name": "Cancelled work",
+        "target": "",
+        "unit": ""
+       },
+       {
+        "actual": "",
+        "dir": "down",
+        "history": [],
+        "id": "setup-dependencies-counts-stories-with-no-estimate",
+        "metric": {
+         "boardId": null,
+         "doneStatuses": [],
+         "jql": "project = PLAT AND issuetype = Story AND \"Story Points\" is EMPTY",
+         "kind": "count",
+         "measure": "count",
+         "stat": "median",
+         "unplanned": {
+          "rule": "added_after_start"
+         },
+         "windowDays": 30
+        },
+        "name": "Stories with no estimate",
+        "target": 0,
+        "unit": ""
+       }
+      ]
+     },
+     "id": "setup-dependencies-counts",
+     "span": 3,
+     "title": "Counts",
+     "type": "kpi"
+    }
+   ],
+   "subtitle": "What work waits on, and what needs tidying"
+  }
+ ]
+}

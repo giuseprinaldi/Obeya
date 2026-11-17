@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "settings": {
+    "jira": {
+      "piField": "customfield_10500",
+      "storyPointsField": "customfield_10106",
+      "boardId": 1,
+      "blocked": { "flagged": true, "statuses": [], "labels": [], "links": true },
+      "notCounted": ["Cancelled"]
+    }
+  },
+  "replaceRoom": false,
+  "roomName": "Example program",
+  "doneStatuses": [],
+  "teams": [
+    { "name": "Platform", "boardId": 1, "scope": "project = PLAT", "measure": "points" },
+    {
+      "name": "Data",
+      "boardId": 2,
+      "scope": "project = DATA",
+      "measure": "points",
+      "estimateField": "customfield_10108",
+      "estimateUnit": "hrs",
+      "boardQuery": "status != Cancelled"
+    }
+  ],
+  "portfolio": {
+    "name": "Portfolio",
+    "items": ["PLAT-1", "DATA-1"],
+    "measure": "count"
+  },
+  "dependencies": { "jql": "project in (PLAT, DATA)" },
+  "counts": [
+    { "name": "Cancelled work", "jql": "status = Cancelled" },
+    { "name": "Stories with no estimate", "jql": "project = PLAT AND issuetype = Story AND \"Story Points\" is EMPTY", "target": 0 }
+  ]
+}
