@@ -365,8 +365,10 @@ class FlowEngine(unittest.TestCase):
         self.assertEqual(r["value"], flow.percent(sum(1 for i in in_sprint if i["type"] == "Bug"), len(in_sprint)))
         r = self.engine().compute(normalize_metric(
             {"kind": "unplanned", "jql": "project = PLAT", "unplanned": {"rule": "labels", "values": ["unplanned"]}}))
-        plat = self.work()
-        self.assertEqual(r["value"], flow.percent(sum(1 for i in plat if "unplanned" in i["labels"]), len(plat)))
+        # A query scope measures everything it matches except sub-tasks, so epics and the initiative count too.
+        plat = [i for i in self.ds.issues if i["project"] == "PLAT" and i["type"] != "Sub-task"]
+        labelled = sum(1 for i in plat if "unplanned" in i["labels"])
+        self.assertEqual(r["value"], flow.percent(labelled, len(plat)))
 
     def test_added_after_start_needs_a_sprint(self):
         for metric in ({"kind": "unplanned", "jql": "project = PLAT"}, {"kind": "unplanned", "boardId": 2}):
