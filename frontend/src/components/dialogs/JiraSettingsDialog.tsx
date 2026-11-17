@@ -112,6 +112,7 @@ export function JiraSettingsDialog({ onClose }: { onClose: () => void }) {
   // The two "blocked" lists are kept as typed and split into names on save.
   const [blockedStatuses, setBlockedStatuses] = useState("");
   const [blockedLabels, setBlockedLabels] = useState("");
+  const [notCounted, setNotCounted] = useState("");
   const [checking, setChecking] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
   const [syncing, setSyncing] = useState(false);
@@ -125,6 +126,7 @@ export function JiraSettingsDialog({ onClose }: { onClose: () => void }) {
         setSettings(full);
         setBlockedStatuses(full.jira.blocked.statuses.join(", "));
         setBlockedLabels(full.jira.blocked.labels.join(", "));
+        setNotCounted(full.jira.notCounted.join(", "));
         setRows((v.pis ?? []).map(row));
       },
       (e: unknown) => live && setLoadError(errorText(e)),
@@ -145,7 +147,7 @@ export function JiraSettingsDialog({ onClose }: { onClose: () => void }) {
     if (problem) return problem;
     try {
       const blocked = { ...settings.jira.blocked, statuses: parseStatusList(blockedStatuses), labels: parseStatusList(blockedLabels) };
-      await api.saveSettings({ jira: { ...settings.jira, blocked }, pis });
+      await api.saveSettings({ jira: { ...settings.jira, blocked, notCounted: parseStatusList(notCounted) }, pis });
     } catch (e) {
       return errorText(e);
     }
@@ -255,6 +257,16 @@ export function JiraSettingsDialog({ onClose }: { onClose: () => void }) {
               <TextField label="Has one of these labels" value={blockedLabels} onChange={setBlockedLabels} placeholder="blocked, waiting" hint="Comma separated." />
             </div>
             <CheckField label="Has an unresolved “is blocked by” link" checked={jira?.blocked.links ?? false} onChange={(links) => setBlocked({ links })} />
+          </div>
+          <div className="dlg-section">
+            <h4>Never counted</h4>
+            <TextField
+              label="Leave out work in these statuses"
+              value={notCounted}
+              onChange={setNotCounted}
+              placeholder="Cancelled, Won't do"
+              hint="Comma separated. Work in these statuses is left out of every bar, burn-up chart and KPI, including work under a linked epic. Use it for a cancelled status that Jira keeps in its Done category, which would otherwise count as delivered. Flow boards still show what the Jira board shows."
+            />
           </div>
           <div className="dlg-section">
             <h4>PI calendar</h4>

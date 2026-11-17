@@ -47,8 +47,10 @@ STATUSES = {
     "In Progress": "indeterminate",
     "In Review": "indeterminate",
     "Done": "done",
+    # Many real workflows keep a status like this in the Done category, although the work was not delivered.
+    "Cancelled": "done",
 }
-STATUS_IDS = {"To Do": "1", "In Progress": "3", "In Review": "10001", "Done": "10002"}
+STATUS_IDS = {"To Do": "1", "In Progress": "3", "In Review": "10001", "Done": "10002", "Cancelled": "10003"}
 CATEGORY_NAMES = {"new": "To Do", "indeterminate": "In Progress", "done": "Done"}
 CATEGORY_IDS = {"new": 2, "indeterminate": 4, "done": 3}
 
@@ -60,6 +62,8 @@ LINK_TYPES = [
     {"id": "10001", "name": "Dependency", "inward": "is depended on by", "outward": "depends on"},
     {"id": "10003", "name": "Relates", "inward": "relates to", "outward": "relates to"},
 ]
+
+RETIRED_EPIC = "Retired export tool"   # the epic that holds the cancelled stories
 
 SPRINT_DAYS = 14
 SPRINT_ANCHOR = date(2026, 1, 5)  # a Monday
@@ -267,6 +271,21 @@ class Dataset:
         first, second = pick("PLAT", "Done"), pick("DATA", "Done", 1)
         if first and second:
             first["links"].append(("Relates", second["key"]))
+
+        # An epic that was wound down: one story delivered, two cancelled, one never started. The
+        # cancelled ones sit in a status of the Done category, as they do in many real workflows.
+        # Added last and without the random generator, so every key and value above stays as it was.
+        retired = self._add("DATA", "Epic", RETIRED_EPIC, "In Progress", pi=prev_pi)
+        for n, (status, points) in enumerate([("Done", 3), ("Cancelled", 5), ("Cancelled", None), ("To Do", 2)]):
+            story = self._add("DATA", "Story", f"Retired export tool part {n + 1}", status, epic=retired["key"],
+                              points=points, assignee=PEOPLE[n % len(PEOPLE)] if status != "To Do" else None,
+                              created=self.now - timedelta(days=40 - n))
+            if status != "To Do":
+                began = self.now - timedelta(days=30 - n)
+                ended = self.now - timedelta(days=21 - n)
+                self._log(story, began, "status", "To Do", "In Progress")
+                self._log(story, ended, "status", "In Progress", status)
+                story["resolved"] = ended
 
     # ---- Jira JSON ----
 

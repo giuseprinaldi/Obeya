@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 
 from .deps import link_direction
+from .flow import clean_names
 from .jira_client import JiraClient, JiraError, JiraUnavailable
 from .periods import clean_calendar, field_ref, pick_pis
 from .sources import text_values
@@ -257,6 +258,28 @@ def run_diagnostics(client: Optional[JiraClient], settings: dict, configured: bo
                     "Cycle time and the other look-back metrics cannot tell when work started or finished.")
         return (PASS, f"{len(categories)} statuses with their categories.")
     report.run("statuses", "Status categories", statuses)
+
+    def not_counted() -> tuple:
+        # Unless a link names its own done statuses, everything in Jira's Done category counts as
+        # delivered. Many workflows keep a cancelled status there, so say which statuses those are.
+        found = client.statuses()
+        known = {s["name"].casefold() for s in found}
+        done = sorted({s["name"] for s in found if s["category"] == "done"}, key=str.casefold)
+        names = clean_names(jira.get("notCounted"))
+        unknown = [n for n in names if n.casefold() not in known]
+        if unknown:
+            return (WARN, "Not a status in this Jira: " + ", ".join(unknown) + ".",
+                    "Correct the name under \"Never counted\" in Jira settings. A name that matches no status "
+                    "leaves that work counted.")
+        left_out = {n.casefold() for n in names}
+        delivered = [n for n in done if n.casefold() not in left_out]
+        shown = ", ".join(delivered[:12]) + (" and more" if len(delivered) > 12 else "")
+        counted = f"Counted as done by default: {shown}." if delivered else "No status counts as done by default."
+        if names:
+            return (PASS, f"Never counted: {', '.join(names)}. {counted}")
+        return (PASS, f"No status is left out. {counted} If one of them means cancelled, "
+                      "name it under \"Never counted\" in Jira settings.")
+    report.run("not_counted", "Statuses never counted", not_counted)
 
     def history() -> tuple:
         # A finished issue must have changed status at least once, so it is the honest sample.

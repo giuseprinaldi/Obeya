@@ -41,18 +41,19 @@ def _ids(value: Any) -> frozenset[str]:
     return frozenset(re.findall(r"\d+", str(value or "")))
 
 
+def clean_names(value: Any) -> list[str]:
+    """A list of status or label names as typed in settings: trimmed, no blanks, no repeats."""
+    if not isinstance(value, list):
+        return []
+    return sorted({str(v).strip() for v in value if str(v).strip()})[:30]
+
+
 def clean_blocked_rule(raw: Any) -> dict:
     raw = raw if isinstance(raw, dict) else {}
-
-    def names(value: Any) -> list[str]:
-        if not isinstance(value, list):
-            return []
-        return sorted({str(v).strip() for v in value if str(v).strip()})[:30]
-
     return {
         "flagged": raw.get("flagged", True) is not False,
-        "statuses": names(raw.get("statuses")),
-        "labels": names(raw.get("labels")),
+        "statuses": clean_names(raw.get("statuses")),
+        "labels": clean_names(raw.get("labels")),
         "links": raw.get("links") is True,
     }
 

@@ -23,7 +23,8 @@ CHUNK = 400  # ids per IN (...) list; old SQLite builds allow 999 parameters
 DEFAULT_SETTINGS = {
     "jira": {"piField": "", "storyPointsField": "", "boardId": None, "showSummaries": True,
              "showAssignees": True,
-             "blocked": {"flagged": True, "statuses": [], "labels": [], "links": False}},
+             "blocked": {"flagged": True, "statuses": [], "labels": [], "links": False},
+             "notCounted": []},
     "pis": [],
 }
 

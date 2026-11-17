@@ -220,7 +220,9 @@ class Diagnostics(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual({c["status"] for c in result["checks"]}, {"pass"}, [c for c in result["checks"] if c["status"] != "pass"])
         self.assertEqual(list(checks), ["configured", "reachable", "token", "visible", "fields", "flagged", "hierarchy",
-                                        "pi_field", "calendar", "boards", "statuses", "history", "age", "links"])
+                                        "pi_field", "calendar", "boards", "statuses", "not_counted", "history", "age", "links"])
+        # The fake's settings name its cancelled status, so only "Done" is left counting as delivered.
+        self.assertEqual(checks["not_counted"]["detail"], "Never counted: Cancelled. Counted as done by default: Done.")
         self.assertIn("Blocks, Dependency", checks["links"]["detail"])     # "Relates" does not read as a dependency
         self.assertIn("9.12.4", checks["reachable"]["detail"])
         self.assertIn("Obeya service account", checks["token"]["detail"])
@@ -298,6 +300,24 @@ class Diagnostics(unittest.TestCase):
         self.assertEqual([checks[c]["status"] for c in ("pi_field", "calendar", "boards")], ["warn"] * 3)
         self.assertIn("2 boards are visible", checks["boards"]["detail"])
 
+    def test_done_category_statuses_are_listed_and_unknown_names_are_caught(self):
+        def none_named(settings):
+            settings["jira"]["notCounted"] = []
+            return settings
+        result, checks = diagnose(none_named)
+        self.assertEqual(checks["not_counted"]["status"], "pass")
+        self.assertIn("Counted as done by default: Cancelled, Done.", checks["not_counted"]["detail"])
+        self.assertIn("If one of them means cancelled", checks["not_counted"]["detail"])
+
+        def misspelt(settings):
+            settings["jira"]["notCounted"] = ["Canceled", "cancelled"]      # one wrong, one right in another case
+            return settings
+        result, checks = diagnose(misspelt)
+        self.assertTrue(result["ok"])
+        self.assertEqual(checks["not_counted"]["status"], "warn")
+        self.assertEqual(checks["not_counted"]["detail"], "Not a status in this Jira: Canceled.")
+        self.assertIn("Never counted", checks["not_counted"]["fix"])
+
     def test_calendar_about_to_run_out(self):
         def last_pi(settings):
             settings["pis"] = [{"name": "PI 26.4", "start": "2026-10-01", "end": "2026-11-15"}]
@@ -320,7 +340,7 @@ class DiagnosticsApi(ApiCase):
         call(self.base, "PUT", "/api/settings", suggested_settings(self.fake.dataset))
         status, body, _ = call(self.base, "GET", "/api/jira/diagnostics")
         self.assertEqual((status, body["ok"]), (200, True))
-        self.assertEqual(len(body["checks"]), 14)
+        self.assertEqual(len(body["checks"]), 15)
         self.assertEqual(set(body["checks"][0]), {"id", "label", "status", "detail", "fix"})
 
 

@@ -14,6 +14,7 @@ import uuid
 from dataclasses import replace
 from datetime import date, timedelta
 
+from fake_jira.data import RETIRED_EPIC
 from fake_jira.server import DEFAULT_TOKEN, make_fake_server, suggested_settings
 from obeya.config import load_config
 from obeya.db import Database
@@ -175,10 +176,12 @@ class SettingsApi(ApiCase):
         _, body, _ = call(self.base, "GET", "/api/settings")
         self.assertEqual(body, {"jira": {"piField": "", "storyPointsField": "", "boardId": None, "showSummaries": True,
                                          "showAssignees": True,
-                                         "blocked": {"flagged": True, "statuses": [], "labels": [], "links": False}},
+                                         "blocked": {"flagged": True, "statuses": [], "labels": [], "links": False},
+                                         "notCounted": []},
                                 "pis": []})
         status, body, _ = call(self.base, "PUT", "/api/settings", {
-            "jira": {"piField": " customfield_10500 ", "boardId": "7", "showSummaries": False, "token": "secret"},
+            "jira": {"piField": " customfield_10500 ", "boardId": "7", "showSummaries": False, "token": "secret",
+                     "notCounted": [" Cancelled ", "", "Won't do", "Cancelled", 7]},
             "pis": [{"name": "B", "start": "2027-01-01", "end": "2027-03-31"},
                     {"name": "A", "start": "2026-10-01", "end": "2026-12-31"},
                     {"name": "Bad", "start": "nope", "end": "2026-12-31"}],
@@ -186,7 +189,8 @@ class SettingsApi(ApiCase):
         self.assertEqual(status, 200)
         self.assertEqual(body["jira"], {"piField": "customfield_10500", "storyPointsField": "", "boardId": None, "showSummaries": False,
                                         "showAssignees": True,
-                                        "blocked": {"flagged": True, "statuses": [], "labels": [], "links": False}})
+                                        "blocked": {"flagged": True, "statuses": [], "labels": [], "links": False},
+                                        "notCounted": ["7", "Cancelled", "Won't do"]})
         self.assertEqual([p["name"] for p in body["pis"]], ["A", "B"])
         self.assertEqual(call(self.base, "GET", "/api/settings")[1], body)
         self.assertEqual(call(self.base, "PUT", "/api/settings", [])[0], 400)
@@ -364,6 +368,29 @@ class FlowApi(ApiCase):
         # "Sync now" and a settings change recompute it as well.
         self.assertEqual(self.syncer.run(full=True, force=True)["sources"], 4)
         self.assertEqual(sorted(self.state()["metrics"]), ["m1", "m2", "m3"])
+
+    def test_never_counted_statuses_from_settings_reach_bars_and_kpis(self):
+        # One epic of the fake holds a delivered story, two cancelled ones and one not started.
+        key = next(i["key"] for i in self.fake.dataset.issues if i["summary"] == RETIRED_EPIC)
+        self.configure()        # the fake's own settings name its cancelled status
+        self.save(room(
+            progress_panel([{"id": "b1", "label": "", "owner": "", "note": "", "source": {"kind": "issue", "key": key}}]),
+            {"id": "kp", "type": "kpi", "title": "KPIs", "span": 3, "data": {"items": [
+                {"id": "m1", "name": "Scope", "unit": "%", "target": 100, "actual": "", "dir": "up", "history": [],
+                 "metric": {"kind": "scope_done", "boardId": None, "jql": f'"Epic Link" = {key}'}}]}}), 0)
+        self.syncer.run(full=True)
+        state = self.state()
+        self.assertEqual((state["progress"]["b1"]["done"], state["progress"]["b1"]["total"]), (1, 2))
+        self.assertEqual(state["metrics"]["m1"]["value"], 50)
+        # Taking the status off the list is a settings change: the same links now count that work,
+        # as delivered, because Jira keeps the status in its Done category.
+        settings = suggested_settings(self.fake.dataset)
+        settings["jira"]["notCounted"] = []
+        self.assertEqual(call(self.base, "PUT", "/api/settings", settings)[0], 200)
+        self.syncer.run(full=True, force=True)
+        state = self.state()
+        self.assertEqual((state["progress"]["b1"]["done"], state["progress"]["b1"]["total"]), (3, 4))
+        self.assertEqual(state["metrics"]["m1"]["value"], 75)
 
     def test_blocked_rule_from_settings_reaches_the_board(self):
         self.configure()

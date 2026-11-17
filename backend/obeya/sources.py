@@ -202,6 +202,8 @@ class Engine:
         self.show_summaries = jira.get("showSummaries", True) is not False
         self.show_assignees = jira.get("showAssignees", True) is not False
         self.blocked_rule = flow.clean_blocked_rule(jira.get("blocked"))
+        # Statuses whose work is left out of every bar, burn-up and KPI (a cancelled status, say).
+        self.not_counted = {name.casefold() for name in flow.clean_names(jira.get("notCounted"))}
         self.pis = settings.get("pis") or []
         self.today = today or date.today()
         found = client.discovered_fields()
@@ -244,6 +246,21 @@ class Engine:
         except JiraError as err:
             return self._failed(spec, f"Jira could not run this: {err}")
 
+    # ---- statuses that are never counted ----
+
+    def _counted(self, items: list[dict]) -> list[dict]:
+        """Issue views, without the ones in a status the room never counts."""
+        if not self.not_counted:
+            return items
+        return [i for i in items if i["status"].casefold() not in self.not_counted]
+
+    def _counted_raw(self, raw: list[dict]) -> list[dict]:
+        """The same for issues as Jira returns them."""
+        if not self.not_counted:
+            return raw
+        return [r for r in raw
+                if str(((r.get("fields") or {}).get("status") or {}).get("name") or "").casefold() not in self.not_counted]
+
     # ---- kinds ----
 
     def daily_history(self, spec: dict, first: date, last: date) -> list[tuple[date, float, float]]:
@@ -267,7 +284,7 @@ class Engine:
             # The work sits below what the link names, so find it first, then read its histories.
             if spec["kind"] == "issue":
                 root = self._root(spec["key"])
-                items = work_items(root, self._descend([root], spec["includeSubtasks"]))
+                items = self._counted(work_items(root, self._descend([root], spec["includeSubtasks"])))
             else:
                 items = self._jql_items(spec)
             keys = [i["key"] for i in items]
@@ -281,7 +298,7 @@ class Engine:
         categories = self.client.status_categories()
         by_points = spec["measure"] == "points"
         items = []
-        for r in raw:
+        for r in self._counted_raw(raw):
             points = issue_view(r, self.points_field)["points"]
             items.append((flow.timeline(r, categories), float(points or 0) if by_points else 1.0))
         days = [first + timedelta(days=n) for n in range((last - first).days + 1)]
@@ -323,7 +340,7 @@ class Engine:
         if not spec["includeSubtasks"]:
             items = [i for i in items if not i["subtask"]]
         if not spec.get("descend"):
-            return items
+            return self._counted(items)
         children = self._descend(items, spec["includeSubtasks"])
         out: list[dict] = []
         seen: set[str] = set()
@@ -332,7 +349,7 @@ class Engine:
                 if item["key"] not in seen:
                     seen.add(item["key"])
                     out.append(item)
-        return out
+        return self._counted(out)
 
     def _auto(self, spec: dict) -> dict:
         jql = resolve_jql(spec["jql"], self.pi_field, self.pis, self.today)
@@ -343,7 +360,7 @@ class Engine:
                 "truncated": truncated, "fetchedAt": _now()}
 
     def _bar(self, root: dict, children: dict[str, list[dict]], spec: dict) -> dict:
-        totals = tally(work_items(root, children), spec["measure"], spec["doneStatuses"])
+        totals = tally(self._counted(work_items(root, children)), spec["measure"], spec["doneStatuses"])
         return {
             "ok": True,
             "key": root["key"],
@@ -534,6 +551,7 @@ class Engine:
         if truncated:
             raise SourceError(f"This scope covers more than {JQL_LIMIT} issues. Narrow it down.")
         raw = [r for r in raw if not ((r.get("fields") or {}).get("issuetype") or {}).get("subtask")]
+        raw = self._counted_raw(raw)
         if lookback:
             return self._lookback(spec, raw)
         return self._snapshot(spec, raw, sprint)

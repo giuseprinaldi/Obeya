@@ -23,7 +23,7 @@ const day = (n) => iso(new Date(Date.now() + n * 86400000));
 
 let room = null, version = 0, updatedAt = null;
 let settings = {
-  jira: { piField: "customfield_10500", storyPointsField: "", boardId: 1, showSummaries: true, showAssignees: true, blocked: { flagged: true, statuses: [], labels: [], links: false } },
+  jira: { piField: "customfield_10500", storyPointsField: "", boardId: 1, showSummaries: true, showAssignees: true, blocked: { flagged: true, statuses: [], labels: [], links: false }, notCounted: [] },
   pis: [{ name: "PI 26.4", start: day(-36), end: day(33) }],
 };
 const TITLES = ["Feature proposal pipeline", "Data platform modernization", "Sign-in and access", "Audit trail", "Review workflow", "Template library"];

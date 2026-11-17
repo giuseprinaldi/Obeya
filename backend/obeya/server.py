@@ -23,7 +23,7 @@ from .config import Config
 from .db import Database
 from .diagnostics import run_diagnostics
 from .jira_client import JiraError, JiraUnavailable
-from .flow import clean_blocked_rule
+from .flow import clean_blocked_rule, clean_names
 from .history import capped, describe_change, summary
 from .periods import clean_calendar, field_ref
 from .sources import normalize_auto, normalize_board, normalize_deps, normalize_metric, normalize_source, text_values
@@ -79,6 +79,7 @@ def clean_settings(raw: Any) -> dict:
             "showSummaries": jira.get("showSummaries", True) is not False,
             "showAssignees": jira.get("showAssignees", True) is not False,
             "blocked": clean_blocked_rule(jira.get("blocked")),
+            "notCounted": clean_names(jira.get("notCounted")),
         },
         "pis": clean_calendar(raw.get("pis")),
     }

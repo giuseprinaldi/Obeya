@@ -142,7 +142,8 @@ def suggested_settings(dataset: Dataset) -> dict:
     return {
         "jira": {"piField": PI_FIELD, "storyPointsField": STORY_POINTS, "boardId": 1, "showSummaries": True,
                  "showAssignees": True,
-                 "blocked": {"flagged": True, "statuses": [], "labels": [], "links": True}},
+                 "blocked": {"flagged": True, "statuses": [], "labels": [], "links": True},
+                 "notCounted": ["Cancelled"]},
         "pis": dataset.pis,
     }
 

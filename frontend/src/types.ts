@@ -665,6 +665,10 @@ export interface Settings {
     showAssignees: boolean;
     /** What counts as blocked, for cards and the blocked metrics. Any one rule is enough. */
     blocked: BlockedRule;
+    /** Status names whose work is left out of every bar, burn-up chart and KPI, including work under a
+        linked epic: a cancelled status that Jira keeps in its Done category, say. Flow boards are not
+        affected; they show what the Jira board shows. */
+    notCounted: string[];
   };
   /** The PI calendar. Order does not matter. */
   pis: Period[];

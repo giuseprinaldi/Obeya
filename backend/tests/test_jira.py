@@ -3,7 +3,7 @@ import threading
 import unittest
 from datetime import date, timedelta
 
-from fake_jira.data import PI_FIELD, STORY_POINTS, Dataset
+from fake_jira.data import PI_FIELD, RETIRED_EPIC, STORY_POINTS, Dataset
 from fake_jira.jql import JqlError, search
 from fake_jira.server import DEFAULT_TOKEN, make_fake_server, suggested_settings
 from obeya.jira_client import JiraClient, JiraError, JiraUnavailable
@@ -41,9 +41,9 @@ class FakeJql(unittest.TestCase):
 
     def test_boolean_logic_and_order_by(self):
         both = self.keys('project = DATA AND issuetype = Epic ORDER BY created DESC')
-        self.assertEqual(len(both), 3)
+        self.assertEqual(len(both), 4)
         either = self.keys('issuetype = Initiative OR (project = DATA AND issuetype = Epic)')
-        self.assertEqual(len(either), 5)
+        self.assertEqual(len(either), 6)
         self.assertEqual(len(self.keys('issuetype in (Epic, Initiative) AND NOT project = DATA')), 8)
         self.assertEqual(len(self.keys("")), len(self.ds.issues))
 
@@ -136,6 +136,50 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(any(s["status"] == "In Review" for s in stories))
         self.assertEqual(r["done"], sum(1 for s in stories if s["status"] in ("Done", "In Review")))
         self.assertEqual(r["inProgress"], sum(1 for s in stories if s["status"] == "In Progress"))
+
+    # The wound-down epic holds four stories: one Done (3 points), two Cancelled (5 points and
+    # none) and one To Do (2 points). Cancelled is in Jira's Done category.
+
+    def retired(self):
+        return next(i["key"] for i in self.ds.issues if i["summary"] == RETIRED_EPIC)
+
+    def test_cancelled_work_counts_as_delivered_until_its_status_is_named(self):
+        source = {"kind": "issue", "key": self.retired()}
+        plain = self.engine(notCounted=[]).compute(normalize_source(source))
+        self.assertEqual((plain["total"], plain["done"], plain["todo"]), (4, 3, 1))
+        named = self.engine(notCounted=["cancelled"]).compute(normalize_source(source))     # any case
+        self.assertEqual((named["total"], named["done"], named["todo"], named["issues"]), (2, 1, 1, 2))
+        self.assertNotIn("Cancelled", named["byStatus"])
+        by_points = self.engine(notCounted=["Cancelled"]).compute(normalize_source({**source, "measure": "points"}))
+        self.assertEqual((by_points["total"], by_points["done"], by_points["unestimated"]), (5, 3, 0))
+
+    def test_naming_done_statuses_alone_counts_cancelled_work_as_in_progress(self):
+        source = {"kind": "issue", "key": self.retired(), "doneStatuses": ["Done"]}
+        only_done = self.engine(notCounted=[]).compute(normalize_source(source))
+        self.assertEqual((only_done["total"], only_done["done"], only_done["inProgress"]), (4, 1, 2))
+        both = self.engine(notCounted=["Cancelled"]).compute(normalize_source(source))
+        self.assertEqual((both["total"], both["done"], both["inProgress"]), (2, 1, 0))
+
+    def test_never_counted_statuses_apply_to_queries_and_auto_bars(self):
+        engine, key = self.engine(notCounted=["Cancelled"]), self.retired()
+        flat = engine.compute(normalize_source({"kind": "jql", "jql": f'"Epic Link" = {key}'}))
+        self.assertEqual((flat["total"], flat["done"]), (2, 1))
+        deep = engine.compute(normalize_source({"kind": "jql", "jql": f"key = {key}", "descend": True}))
+        self.assertEqual((deep["total"], deep["done"]), (2, 1))
+        auto = engine.compute(normalize_auto({"jql": f"key = {key}"}))
+        self.assertEqual([(b["total"], b["done"]) for b in auto["bars"]], [(2, 1)])
+        # An epic with nothing left under it but cancelled work still shows, as one open item.
+        self.assertEqual(self.engine(notCounted=["Cancelled", "Done", "To Do"]).compute(
+            normalize_source({"kind": "issue", "key": key}))["total"], 0)
+
+    def test_replayed_days_leave_out_never_counted_work(self):
+        key, first = self.retired(), TODAY - timedelta(days=10)
+        for source in ({"kind": "issue", "key": key}, {"kind": "jql", "jql": f'"Epic Link" = {key}'}):
+            spec = normalize_source(source)
+            rows = self.engine(notCounted=["Cancelled"]).daily_history(spec, first, TODAY)
+            self.assertEqual({(done, total) for _, done, total in rows}, {(1, 2)}, source)
+            rows = self.engine(notCounted=[]).daily_history(spec, first, TODAY)
+            self.assertEqual({(done, total) for _, done, total in rows}, {(3, 4)}, source)
 
     def test_issue_not_found(self):
         r = self.engine().compute(normalize_source({"kind": "issue", "key": "NOPE-1"}))

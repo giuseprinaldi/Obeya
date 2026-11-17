@@ -360,12 +360,12 @@ describe("normalizeRoom with Jira-fed panels", () => {
 describe("withSettingsDefaults", () => {
   it("fills in the settings an older server does not send", () => {
     const s = withSettingsDefaults({ jira: { piField: "customfield_1", storyPointsField: "", boardId: 3, showSummaries: false }, pis: [] });
-    expect(s.jira).toEqual({ piField: "customfield_1", storyPointsField: "", boardId: 3, showSummaries: false, showAssignees: true, blocked: { flagged: true, statuses: [], labels: [], links: false } });
+    expect(s.jira).toEqual({ piField: "customfield_1", storyPointsField: "", boardId: 3, showSummaries: false, showAssignees: true, blocked: { flagged: true, statuses: [], labels: [], links: false }, notCounted: [] });
   });
   it("keeps what the server sent", () => {
-    const sent = { piField: "", storyPointsField: "", boardId: null, showSummaries: true, showAssignees: false, blocked: { flagged: false, statuses: ["Blocked", " "], labels: ["waiting"], links: true } };
+    const sent = { piField: "", storyPointsField: "", boardId: null, showSummaries: true, showAssignees: false, blocked: { flagged: false, statuses: ["Blocked", " "], labels: ["waiting"], links: true }, notCounted: [" Cancelled ", ""] };
     expect(withSettingsDefaults({ jira: sent, pis: [{ name: "PI 1", start: "2026-01-01", end: "2026-03-01" }] })).toEqual({
-      jira: { ...sent, blocked: { flagged: false, statuses: ["Blocked"], labels: ["waiting"], links: true } },
+      jira: { ...sent, blocked: { flagged: false, statuses: ["Blocked"], labels: ["waiting"], links: true }, notCounted: ["Cancelled"] },
       pis: [{ name: "PI 1", start: "2026-01-01", end: "2026-03-01" }],
     });
   });

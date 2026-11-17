@@ -41,7 +41,8 @@ export function parseStatusList(text: string): string[] {
 type Loose<T> = { [K in keyof T]?: T[K] | null };
 
 /** Settings as the page uses them. A server from before a setting existed leaves it out, so the
-    defaults are filled in here: flagged issues count as blocked, and assignee names are shown. */
+    defaults are filled in here: flagged issues count as blocked, assignee names are shown, and no
+    status is left out of the counts. */
 export function withSettingsDefaults(raw: { jira?: Loose<Settings["jira"]> | null; pis?: Settings["pis"] | null } | null | undefined): Settings {
   const j = raw?.jira ?? {};
   const b: Loose<Settings["jira"]["blocked"]> = j.blocked ?? {};
@@ -59,6 +60,7 @@ export function withSettingsDefaults(raw: { jira?: Loose<Settings["jira"]> | nul
         labels: list(b.labels),
         links: b.links ?? false,
       },
+      notCounted: list(j.notCounted),
     },
     pis: Array.isArray(raw?.pis) ? raw.pis : [],
   };

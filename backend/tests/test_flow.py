@@ -3,7 +3,7 @@ import threading
 import unittest
 from datetime import date, datetime, timedelta, timezone
 
-from fake_jira.data import STATUSES, STATUS_IDS, status_json, stamp
+from fake_jira.data import RETIRED_EPIC, STATUSES, STATUS_IDS, status_json, stamp
 from fake_jira.server import DEFAULT_TOKEN, make_fake_server, suggested_settings
 from obeya import flow
 from obeya.jira_client import JiraClient
@@ -369,6 +369,22 @@ class FlowEngine(unittest.TestCase):
         plat = [i for i in self.ds.issues if i["project"] == "PLAT" and i["type"] != "Sub-task"]
         labelled = sum(1 for i in plat if "unplanned" in i["labels"])
         self.assertEqual(r["value"], flow.percent(labelled, len(plat)))
+
+    def test_never_counted_statuses_are_left_out_of_kpis(self):
+        # The wound-down epic: one story Done, two Cancelled (a Done-category status), one To Do.
+        key = next(i["key"] for i in self.ds.issues if i["summary"] == RETIRED_EPIC)
+        scope = f'"Epic Link" = {key}'
+        counted, named = self.engine(notCounted=[]), self.engine(notCounted=["Cancelled"])
+        metric = normalize_metric({"kind": "scope_done", "jql": scope})
+        self.assertEqual((counted.compute(metric)["value"], counted.compute(metric)["n"]), (75, 4))
+        self.assertEqual((named.compute(metric)["value"], named.compute(metric)["n"]), (50, 2))
+        self.assertEqual(named.compute(metric)["detail"], "1 of 2 issues done")
+        finished = normalize_metric({"kind": "throughput", "jql": scope, "windowDays": 30})
+        self.assertEqual(counted.compute(finished)["n"], 3)
+        self.assertEqual(named.compute(finished)["n"], 1)
+        # With only the done statuses named, cancelled work would sit in progress for ever.
+        wip = normalize_metric({"kind": "wip", "jql": scope, "doneStatuses": ["Done"]})
+        self.assertEqual((counted.compute(wip)["value"], named.compute(wip)["value"]), (2, 0))
 
     def test_added_after_start_needs_a_sprint(self):
         for metric in ({"kind": "unplanned", "jql": "project = PLAT"}, {"kind": "unplanned", "boardId": 2}):

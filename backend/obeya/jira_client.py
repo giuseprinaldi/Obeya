@@ -64,8 +64,8 @@ class JiraClient:
         self._deployment: Optional[str] = None
         self._fields: Optional[list[dict]] = None
         self._fields_at = 0.0
-        self._categories: Optional[dict[str, str]] = None
-        self._categories_at = 0.0
+        self._statuses: Optional[list[dict]] = None
+        self._statuses_at = 0.0
         self._board_configs: dict[int, tuple[float, dict]] = {}
 
     # ---- transport ----
@@ -161,15 +161,20 @@ class JiraClient:
             found["story_points"] = named_points
         return found
 
-    def status_categories(self) -> dict[str, str]:
-        """Status id -> category key ("new", "indeterminate" or "done"), for reading histories."""
+    def statuses(self) -> list[dict]:
+        """Every status this Jira has: id, name and category key ("new", "indeterminate" or "done")."""
         with self._lock:
-            if self._categories is None or time.time() - self._categories_at > FIELD_CACHE_SECONDS:
-                statuses = self._request("GET", "/rest/api/2/status") or []
-                self._categories = {str(s.get("id")): str((s.get("statusCategory") or {}).get("key") or "")
-                                    for s in statuses if s.get("id") is not None}
-                self._categories_at = time.time()
-            return self._categories
+            if self._statuses is None or time.time() - self._statuses_at > FIELD_CACHE_SECONDS:
+                found = self._request("GET", "/rest/api/2/status") or []
+                self._statuses = [{"id": str(s.get("id")), "name": str(s.get("name") or ""),
+                                   "category": str((s.get("statusCategory") or {}).get("key") or "")}
+                                  for s in found if isinstance(s, dict) and s.get("id") is not None]
+                self._statuses_at = time.time()
+            return self._statuses
+
+    def status_categories(self) -> dict[str, str]:
+        """Status id -> category key, for reading histories."""
+        return {s["id"]: s["category"] for s in self.statuses()}
 
     def link_types(self) -> list[dict]:
         """The issue link types this Jira has, each with its name and how it reads from either end."""

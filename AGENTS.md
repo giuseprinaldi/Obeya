@@ -51,7 +51,7 @@ python -m unittest discover -s tests -t .
 python scripts/dev.py
 ```
 
-Requirements are Python 3.10+ and Node 20+. Expect 165 frontend and 184 backend tests to pass. `scripts/dev.py` serves the app on http://127.0.0.1:8787 against the fake Jira on port 8790. Open it once so you know what a working room looks like, then stop it.
+Requirements are Python 3.10+ and Node 20+. Expect 165 frontend and 191 backend tests to pass. `scripts/dev.py` serves the app on http://127.0.0.1:8787 against the fake Jira on port 8790. Open it once so you know what a working room looks like, then stop it.
 
 `scripts/dev.py` is for the demo only. It overrides the Jira address and token with the fake's and, on a new database, saves Jira settings that match the fake. **Do not use it for the real Jira, and do not reuse its database:** start step 2 with a fresh one (delete `backend/data/obeya.db*`, or set `DATABASE_URL` to another file).
 
@@ -72,7 +72,7 @@ JIRA_CA_BUNDLE=         # path to a CA file, if needed
 python -m obeya check
 ```
 
-It runs fourteen checks in order and prints a fix beside each warning or failure. It exits 1 if anything failed. If Jira cannot be reached or rejects the token, the rest are skipped, so fix from the top. At this point the PI and board checks will warn that nothing is chosen yet; that is step 3.
+It runs fifteen checks in order and prints a fix beside each warning or failure. It exits 1 if anything failed. If Jira cannot be reached or rejects the token, the rest are skipped, so fix from the top. At this point the PI and board checks will warn that nothing is chosen yet; that is step 3.
 
 | If this fails | Look at |
 |---|---|

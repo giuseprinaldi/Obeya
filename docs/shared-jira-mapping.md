@@ -15,15 +15,16 @@ A project-wide board, velocity or cycle time mixes teams that plan differently. 
 
 Find out how much work has no team at all (`Team is EMPTY`). On a shared project it can be most of it. If the walls only show team slices, that work disappears from the room, so give it a place of its own.
 
-## 2. Say what "done" means on every link
+## 2. Say what "done" means, once
 
 By default a link counts an issue as done when its status is in Jira's Done category. Shared projects often keep a cancelled or no-longer-needed status in that category. Left alone, cancelled work is counted as delivered in every bar, KPI and burn-up.
 
-- List the statuses that mean delivered and enter them under **Statuses that count as done** on every bar, KPI and burn-up (`doneStatuses` in the room document). Leave the cancelled status out.
-- **Leaving a status out of that list does not remove the work.** An issue in a Done-category status that is not on the list is counted as in progress: the bar or burn-up never reaches 100%, and a work-in-progress KPI counts it. So also exclude the status in the query (`AND status != Cancelled`). That works for a KPI (one on a board takes a query as well) and for a query link that counts its matches. It does not reach the work found under an issue: a bar linked to an issue key, an auto-fill bar, or a query with "Count the work under each match". See section 7.
+- **Name the cancelled status under "Never counted" in Jira settings.** Work in it is then left out of every bar, burn-up and KPI, including the work found under a linked epic or initiative. It is one setting for the whole room.
+- The connection check line "Statuses never counted" lists every status in the Done category. Read it: anything there that does not mean delivered needs handling.
+- If the Done category holds other statuses that are not delivered either (a release or waiting status, say), list the ones that are under **Statuses that count as done** on each link (`doneStatuses` in the room document). A Done-category status left off that list counts as in progress, not as removed, so use "Never counted" for work that should not count at all.
 - **Do not use the resolution field** to tell delivered from cancelled until you have counted it. Workflows often set the same resolution on both.
-- **Do not trust a board's last column** as the definition of done. Columns are a team's display choice and can hold release or waiting statuses. Check each board's column mapping (`/rest/agile/1.0/board/{id}/configuration`) against the list above.
-- A board whose filter hides the cancelled status will show different totals from a query that does not. Decide which one the wall should match and say so on the wall.
+- **Do not trust a board's last column** as the definition of done. Columns are a team's display choice and can hold release or waiting statuses. Check each board's column mapping (`/rest/agile/1.0/board/{id}/configuration`) against the statuses that mean delivered.
+- **Flow boards are not affected by "Never counted".** They show what the Jira board shows. A board whose filter hides the cancelled status will show different totals from a KPI on the same board that does not. To leave cancelled cards off a wall, add `status != Cancelled` as the board's extra query.
 
 ## 3. Blocked
 
@@ -53,7 +54,7 @@ Collect these with read-only calls and keep the answers in a private note, not i
 | Each team's board id and type | `GET /api/jira/boards` | Flow boards and KPIs on that team's wall |
 | Each board's filter query | the board's settings in Jira, or its owner. The server never reads saved filters, so the service account may not be able to. | Check that it selects the team, and whether it hides cancelled work |
 | Each board's columns and the statuses in them | board configuration | Check against the done list; hidden columns |
-| Statuses that mean delivered, and the one that means cancelled | `/rest/api/2/status` lists every status with its category; the teams say which ones mean what | "Statuses that count as done" on every link; the status to exclude in queries |
+| Statuses that mean delivered, and the one that means cancelled | the connection check lists the Done category; the teams say which ones mean what | "Never counted" in Jira settings; "Statuses that count as done" on a link only where needed |
 | How blocked work is marked | ask the teams | "Blocked means" in Jira settings |
 | Which estimate each team uses | board configuration (`estimation`, scrum boards only), or ask the team | Points or count, per wall |
 | The team field and how much work leaves it empty | one search | Queries; a place for unassigned work |
@@ -66,8 +67,7 @@ These came out of mapping a real shared project. Each has a workaround today and
 
 | Gap | Workaround today |
 |---|---|
-| No room-wide list of statuses that are not delivered. | Enter the done statuses on every link. Flow boards still show the board's own last column. |
-| Work found under an issue cannot be filtered by status. With done statuses set, a cancelled story under a linked epic counts as in progress; without them it counts as delivered. | Link the bar to a query that counts its matches and excludes the status. |
+| Flow boards take their last column from the Jira board, whatever statuses it holds. | Fix the column mapping in Jira, or hide the column on the wall. |
 | No KPI that simply counts the issues matching a query, which is what a data-quality wall and an "unassigned work" figure need. | A bar linked to the query shows done against total, not a count of gaps. |
 | One estimate field for the whole room. A team that estimates in another field cannot use points. | Use count on that team's wall. |
 | WIP limits are per column, as Jira boards define them. A per-person limit cannot be checked. | None. |
