@@ -386,6 +386,39 @@ class FlowEngine(unittest.TestCase):
         wip = normalize_metric({"kind": "wip", "jql": scope, "doneStatuses": ["Done"]})
         self.assertEqual((counted.compute(wip)["value"], named.compute(wip)["value"]), (2, 0))
 
+    def test_count_is_what_jira_itself_reports(self):
+        def count(**metric):
+            r = self.engine().compute(normalize_metric({"kind": "count", **metric}))
+            self.assertTrue(r["ok"], r)
+            self.assertEqual((r["unit"], r["n"], r["history"]), ("items", r["value"], []))
+            return r["value"]
+        plat = [i for i in self.ds.issues if i["project"] == "PLAT"]
+        # Everything the query matches: sub-tasks too, and statuses the room never counts elsewhere.
+        self.assertEqual(count(jql="project = PLAT ORDER BY created"), len(plat))
+        self.assertTrue(any(i["type"] == "Sub-task" for i in plat))
+        self.assertEqual(count(jql="status = Cancelled"), 2)
+        self.assertEqual(count(jql="project = NOPE OR key = PLAT-1"), 1)
+        # A scrum board is counted over its active sprint; a query narrows a board.
+        self.assertEqual(count(boardId=1), len(self.work(sprint=self.active)))
+        self.assertEqual(count(boardId=2, jql="issuetype = Epic"),
+                         sum(1 for i in self.ds.issues if i["project"] == "DATA" and i["type"] == "Epic"))
+        r = self.engine().compute(normalize_metric({"kind": "count", "jql": "project = PLAT"}))
+        self.assertEqual(r["detail"], f"{len(plat)} issues match")
+        r = self.engine().compute(normalize_metric({"kind": "count", "jql": "nosuchfield = 1"}))
+        self.assertFalse(r["ok"])
+        self.assertIn("nosuchfield", r["error"])
+
+    def test_count_asks_jira_for_the_total_and_no_issues(self):
+        engine = self.engine()
+        engine.compute(normalize_metric({"kind": "count", "jql": "project = PLAT"}))     # warm the caches
+        before = self.server.requests
+        self.assertEqual(engine.compute(normalize_metric({"kind": "count", "jql": "project in (PLAT, DATA)"}))["value"],
+                         len(self.ds.issues))
+        self.assertEqual(self.server.requests - before, 1)      # one call, however many issues match
+        # Asked for no issues, Jira answers with none and the total, and so does the fake.
+        page = self.client._request("POST", "/rest/api/2/search", body={"jql": "", "maxResults": 0})
+        self.assertEqual((page["issues"], page["total"], page["maxResults"]), ([], len(self.ds.issues), 0))
+
     def test_added_after_start_needs_a_sprint(self):
         for metric in ({"kind": "unplanned", "jql": "project = PLAT"}, {"kind": "unplanned", "boardId": 2}):
             r = self.engine().compute(normalize_metric(metric))
@@ -449,6 +482,10 @@ class FlowEngine(unittest.TestCase):
                                 "doneStatuses": [], "windowDays": 365})
         r = self.engine().compute(normalize_metric({"kind": "wip", "jql": "nosuchfield = 1"}))
         self.assertFalse(r["ok"])
+        # A count has no done statuses, window or measure, so none of them can change its identity.
+        self.assertEqual(normalize_metric({"kind": "count", "jql": " project = PLAT ", "doneStatuses": ["Done"],
+                                           "windowDays": 90, "measure": "points"}),
+                         {"kind": "metric", "metric": "count", "boardId": None, "jql": "project = PLAT", "doneStatuses": []})
 
 
 class MidSprint(unittest.TestCase):

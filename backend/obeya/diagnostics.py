@@ -106,6 +106,16 @@ def run_diagnostics(client: Optional[JiraClient], settings: dict, configured: bo
         return (PASS, f"The account can read issues (most recently updated: {issues[0].get('key')}).")
     report.run("visible", "Issues are visible", visible)
 
+    def counts() -> tuple:
+        if not sample.get("issue"):
+            return (SKIP, "No issue was available to count.")
+        n = client.count("order by updated desc")
+        if n <= 0:
+            return (WARN, "A search finds issues, but Jira says that none match.",
+                    "KPIs that count issues will show 0. Every other figure is unaffected.")
+        return (PASS, f"Jira reports how many issues a search matches ({n} are visible to this account).")
+    report.run("counts", "Issue counts", counts)
+
     # ---- fields ----
 
     found: dict[str, Any] = {}

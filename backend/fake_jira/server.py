@@ -102,7 +102,8 @@ def make_fake_server(host: str = "127.0.0.1", port: int = 8790, token: str = DEF
                 self._send(400, {"errorMessages": [str(err)], "errors": {}})
                 return
             start = int(args.get("startAt") or 0)
-            size = max(0, min(int(args.get("maxResults") or 50), 100))
+            asked = args.get("maxResults")
+            size = 50 if asked in (None, "") else max(0, min(int(asked), 100))     # 0 = no issues, only the total
             fields = args.get("fields")
             if isinstance(fields, str):
                 fields = fields.split(",")

@@ -51,7 +51,7 @@ python -m unittest discover -s tests -t .
 python scripts/dev.py
 ```
 
-Requirements are Python 3.10+ and Node 20+. Expect 165 frontend and 191 backend tests to pass. `scripts/dev.py` serves the app on http://127.0.0.1:8787 against the fake Jira on port 8790. Open it once so you know what a working room looks like, then stop it.
+Requirements are Python 3.10+ and Node 20+. Expect 167 frontend and 193 backend tests to pass. `scripts/dev.py` serves the app on http://127.0.0.1:8787 against the fake Jira on port 8790. Open it once so you know what a working room looks like, then stop it.
 
 `scripts/dev.py` is for the demo only. It overrides the Jira address and token with the fake's and, on a new database, saves Jira settings that match the fake. **Do not use it for the real Jira, and do not reuse its database:** start step 2 with a fresh one (delete `backend/data/obeya.db*`, or set `DATABASE_URL` to another file).
 
@@ -72,7 +72,7 @@ JIRA_CA_BUNDLE=         # path to a CA file, if needed
 python -m obeya check
 ```
 
-It runs fifteen checks in order and prints a fix beside each warning or failure. It exits 1 if anything failed. If Jira cannot be reached or rejects the token, the rest are skipped, so fix from the top. At this point the PI and board checks will warn that nothing is chosen yet; that is step 3.
+It runs sixteen checks in order and prints a fix beside each warning or failure. It exits 1 if anything failed. If Jira cannot be reached or rejects the token, the rest are skipped, so fix from the top. At this point the PI and board checks will warn that nothing is chosen yet; that is step 3.
 
 | If this fails | Look at |
 |---|---|
@@ -156,6 +156,7 @@ Each of these is an assumption taken from Jira Data Center's documentation. Conf
 | The burn-up replay finishes in reasonable time on a real scope. It is one search with histories per chart for a query, and one per 40 issues for an issue link, run once per chart. | Add a PI burn-up and time the first sync; watch the server log. | `Engine.daily_history` in `sources.py`, `Syncer._backfill` in `sync.py` |
 | Dependency link types are worded so the direction can be read ("is blocked by", "depends on"), and linked issues arrive with summary and status inside the link. | Check "Dependency links"; compare the dependencies panel with a few issues in Jira. If the wording is unusual, name the link types in the panel settings. | `deps.py` |
 | Board columns, WIP limits, the kanban sub-filter and the active sprint come back in the documented shape. | Compare the Program flow panel with the board in Jira. | `board_config`, `board_issues`, `active_sprint` in `jira_client.py` |
+| A search asked for no issues (`maxResults` 0) still returns its `total`, on `search` and on a board's issues. The "Issues matching" KPI is that one call. | Check "Issue counts"; compare a count KPI with the same query in Jira's issue search. | `count`, `board_count` in `jira_client.py` |
 | Rate limits. When Jira answers 429 (or 502, 503, 504) the client waits, for as long as `Retry-After` says up to 20 seconds, and tries twice more before giving up on that sync. | Watch the server log during a full sync. | `_request`, `_retry_after` in `jira_client.py` |
 | Jira Cloud. The client switches to `/rest/api/3/search/jql` and the `parent` field when `serverInfo` says Cloud, but none of it has run. | Only if the real Jira is Cloud: expect more to fix here than anywhere else. | `jira_client.py`, `sources.py` |
 

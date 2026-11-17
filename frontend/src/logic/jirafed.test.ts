@@ -126,8 +126,14 @@ describe("effectiveKpi", () => {
 
 describe("metric options", () => {
   it("has an entry for every kind", () => {
-    expect(METRIC_KINDS).toHaveLength(8);
+    expect(METRIC_KINDS).toHaveLength(9);
     for (const k of METRIC_KINDS) expect(METRICS[k].explain.length).toBeGreaterThan(10);
+  });
+  it("offers a plain count of the issues a query matches", () => {
+    expect(METRICS.count).toMatchObject({ window: false, stat: false, measure: false });
+    expect(relabel({ name: "", unit: "", dir: "up" }, null, defaultMetric("count"))).toEqual({ name: "Issues", unit: "", dir: "down" });
+    expect(metricError({ ...defaultMetric("count"), jql: "status = Cancelled" })).toBe("");
+    expect(metricError(defaultMetric("count"))).toContain("Choose a board or enter a Jira query");
   });
   it("fills in name, unit and direction for a new KPI", () => {
     expect(relabel({ name: "", unit: "", dir: "up" }, null, defaultMetric("cycle_time"))).toEqual({ name: "Cycle time", unit: "days", dir: "down" });
@@ -324,6 +330,10 @@ describe("normalizeRoom with Jira-fed panels", () => {
       doneStatuses: ["Done"],
       unplanned: { rule: "labels", values: ["x"] },
     });
+  });
+  it("keeps a count of the issues a query matches", () => {
+    const r = room([kpiPanel([{ id: "a", name: "No team", metric: { kind: "count", jql: " Team is EMPTY " } }])]);
+    expect((r.walls[0]!.panels[0] as KpiPanel).data.items[0]!.metric).toMatchObject({ kind: "count", jql: "Team is EMPTY", boardId: null });
   });
   it("drops a malformed metric and keeps the KPI", () => {
     const r = room([

@@ -20,6 +20,7 @@ from typing import Any, Optional
 log = logging.getLogger("obeya.jira")
 
 PAGE_SIZE = 100
+COUNT_LIMIT = 5000   # most issues counted on Cloud, which has to read them to count them
 FIELD_CACHE_SECONDS = 3600
 
 
@@ -216,6 +217,17 @@ class JiraClient:
             if len(issues) >= limit:
                 return issues[:limit], True
 
+    def count(self, jql: str) -> int:
+        """How many issues a query matches, as Jira itself counts them. One call, no issues read."""
+        if self.is_cloud():
+            # Cloud's search reports no total, so the matches are paged through and counted.
+            issues, truncated = self.search(jql, ["issuetype"], limit=COUNT_LIMIT)
+            if truncated:
+                raise JiraError(f"More than {COUNT_LIMIT} issues match, which is too many to count on Jira Cloud.")
+            return len(issues)
+        page = self._request("POST", "/rest/api/2/search", body={"jql": jql, "startAt": 0, "maxResults": 0}) or {}
+        return _total(page)
+
     # ---- agile ----
 
     def boards(self, limit: int = 300) -> list[dict]:
@@ -263,6 +275,13 @@ class JiraClient:
             if len(issues) >= limit:
                 return issues[:limit], True
 
+    def board_count(self, board_id: int, jql: str = "") -> int:
+        """How many issues a board holds, optionally narrowed by JQL. One call, no issues read."""
+        params: dict[str, Any] = {"startAt": 0, "maxResults": 0}
+        if jql:
+            params["jql"] = jql
+        return _total(self._request("GET", f"/rest/agile/1.0/board/{int(board_id)}/issue", params) or {})
+
     def active_sprint(self, board_id: int) -> Optional[dict]:
         page = self._request("GET", f"/rest/agile/1.0/board/{int(board_id)}/sprint", {"state": "active"}) or {}
         sprints = [s for s in (page.get("values") or []) if s.get("startDate") and s.get("endDate")]
@@ -270,6 +289,13 @@ class JiraClient:
             return None
         # With parallel sprints, follow the one that ends first.
         return sorted(sprints, key=lambda s: str(s.get("endDate")))[0]
+
+
+def _total(page: dict) -> int:
+    total = page.get("total")
+    if isinstance(total, bool) or not isinstance(total, int) or total < 0:
+        raise JiraError("Jira did not say how many issues match.")
+    return total
 
 
 def _error_message(err: urllib.error.HTTPError) -> str:

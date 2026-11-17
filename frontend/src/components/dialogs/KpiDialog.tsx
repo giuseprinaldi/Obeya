@@ -237,13 +237,17 @@ export function KpiDialog({ panel, itemId, onClose }: { panel: KpiPanel; itemId?
                 ) : null}
               </>
             ) : null}
-            <TextField
-              label="Statuses that count as done"
-              value={metric.doneStatuses}
-              onChange={(doneStatuses) => changeMetric({ doneStatuses })}
-              placeholder="Leave empty to use Jira's done category"
-              hint="Comma separated, for example: Done, Released. Sub-tasks are never counted."
-            />
+            {metric.kind === "count" ? (
+              <span className="hint">Every issue in the scope is counted, whatever its status. Put the condition in the query, for example: Team is EMPTY.</span>
+            ) : (
+              <TextField
+                label="Statuses that count as done"
+                value={metric.doneStatuses}
+                onChange={(doneStatuses) => changeMetric({ doneStatuses })}
+                placeholder="Leave empty to use Jira's done category"
+                hint="Comma separated, for example: Done, Released. Sub-tasks are never counted."
+              />
+            )}
             <CheckLink
               label="Check"
               build={() => {

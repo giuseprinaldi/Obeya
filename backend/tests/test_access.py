@@ -219,12 +219,13 @@ class Diagnostics(unittest.TestCase):
         result, checks = diagnose()
         self.assertTrue(result["ok"])
         self.assertEqual({c["status"] for c in result["checks"]}, {"pass"}, [c for c in result["checks"] if c["status"] != "pass"])
-        self.assertEqual(list(checks), ["configured", "reachable", "token", "visible", "fields", "flagged", "hierarchy",
+        self.assertEqual(list(checks), ["configured", "reachable", "token", "visible", "counts", "fields", "flagged", "hierarchy",
                                         "pi_field", "calendar", "boards", "statuses", "not_counted", "history", "age", "links"])
         # The fake's settings name its cancelled status, so only "Done" is left counting as delivered.
         self.assertEqual(checks["not_counted"]["detail"], "Never counted: Cancelled. Counted as done by default: Done.")
         self.assertIn("Blocks, Dependency", checks["links"]["detail"])     # "Relates" does not read as a dependency
         self.assertIn("9.12.4", checks["reachable"]["detail"])
+        self.assertIn("are visible to this account", checks["counts"]["detail"])
         self.assertIn("Obeya service account", checks["token"]["detail"])
         self.assertIn("PI 26.4", checks["pi_field"]["detail"])
         self.assertIn("Platform board", checks["boards"]["detail"])
@@ -340,7 +341,7 @@ class DiagnosticsApi(ApiCase):
         call(self.base, "PUT", "/api/settings", suggested_settings(self.fake.dataset))
         status, body, _ = call(self.base, "GET", "/api/jira/diagnostics")
         self.assertEqual((status, body["ok"]), (200, True))
-        self.assertEqual(len(body["checks"]), 15)
+        self.assertEqual(len(body["checks"]), 16)
         self.assertEqual(set(body["checks"][0]), {"id", "label", "status", "detail", "fix"})
 
 

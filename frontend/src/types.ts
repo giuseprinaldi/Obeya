@@ -104,7 +104,8 @@ export type MetricKind =
   | "scope_done" // % of the scope that is done right now
   | "wip" // items in progress right now
   | "blocked_now" // items blocked right now
-  | "unplanned"; // % of the scope that is unplanned
+  | "unplanned" // % of the scope that is unplanned
+  | "count"; // issues the scope holds right now, as Jira's own search counts them
 
 /** How "unplanned" is decided for the unplanned metric. */
 export type UnplannedRule =
@@ -112,7 +113,8 @@ export type UnplannedRule =
   | { rule: "labels"; values: string[] } // has one of these labels
   | { rule: "types"; values: string[] }; // is one of these issue types
 
-/** A KPI whose value is worked out from Jira. Sub-tasks are never counted. */
+/** A KPI whose value is worked out from Jira. Sub-tasks are never counted, except by "count",
+    which reports exactly what Jira's search does. */
 export interface Metric {
   kind: MetricKind;
   /** Scope: a board, a JQL query, or both (the query then narrows the board). At least one
@@ -126,7 +128,7 @@ export interface Metric {
   stat: "median" | "average" | "p85";
   /** scope_done, wip and unplanned: count issues or sum story points. */
   measure: Measure;
-  /** Status names that count as done. Empty = the "Done" status category in Jira. */
+  /** Status names that count as done. Empty = the "Done" status category in Jira. Not used by "count". */
   doneStatuses: string[];
   unplanned: UnplannedRule;
 }

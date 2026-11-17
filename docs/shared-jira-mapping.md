@@ -13,7 +13,7 @@ A project-wide board, velocity or cycle time mixes teams that plan differently. 
 - **Bars and burn-ups:** these take an issue or a query, not a board id, so use the query that names the team.
 - **Leadership walls:** show the portfolio level (initiatives and epics) and counts per team side by side. Do not add team numbers together unless they use the same unit.
 
-Find out how much work has no team at all (`Team is EMPTY`). On a shared project it can be most of it. If the walls only show team slices, that work disappears from the room, so give it a place of its own.
+Find out how much work has no team at all (`Team is EMPTY`). On a shared project it can be most of it. If the walls only show team slices, that work disappears from the room, so give it a place of its own: a KPI of the kind "Issues matching" on that query shows the figure and its trend.
 
 ## 2. Say what "done" means, once
 
@@ -68,7 +68,6 @@ These came out of mapping a real shared project. Each has a workaround today and
 | Gap | Workaround today |
 |---|---|
 | Flow boards take their last column from the Jira board, whatever statuses it holds. | Fix the column mapping in Jira, or hide the column on the wall. |
-| No KPI that simply counts the issues matching a query, which is what a data-quality wall and an "unassigned work" figure need. | A bar linked to the query shows done against total, not a count of gaps. |
 | One estimate field for the whole room. A team that estimates in another field cannot use points. | Use count on that team's wall. |
 | WIP limits are per column, as Jira boards define them. A per-person limit cannot be checked. | None. |
 

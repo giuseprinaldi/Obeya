@@ -23,7 +23,7 @@ CARDS_PER_COLUMN = 30  # cards sent to screens per column; the column total is a
 HISTORY_WEEKS = 8      # weekly trend points for the look-back metrics
 
 METRIC_KINDS = ("cycle_time", "lead_time", "throughput", "blocked_days",
-                "scope_done", "wip", "blocked_now", "unplanned")
+                "scope_done", "wip", "blocked_now", "unplanned", "count")
 LOOKBACK = ("cycle_time", "lead_time", "throughput", "blocked_days")
 STAT_LABEL = {"median": "Median", "average": "Average", "p85": "85th percentile"}
 
@@ -136,7 +136,7 @@ def normalize_metric(raw: Any) -> Optional[dict]:
         return None
     options = _options(raw)
     spec: dict[str, Any] = {"kind": "metric", "metric": kind, "boardId": board, "jql": jql,
-                            "doneStatuses": options["doneStatuses"]}
+                            "doneStatuses": [] if kind == "count" else options["doneStatuses"]}
     if kind in LOOKBACK:
         spec["windowDays"] = _int(raw.get("windowDays"), 30, 7, 365)
     if kind in ("cycle_time", "lead_time"):
@@ -520,6 +520,8 @@ class Engine:
 
     def _metric(self, spec: dict) -> dict:
         kind = spec["metric"]
+        if kind == "count":
+            return self._count(spec)
         lookback = kind in LOOKBACK
         rule = spec.get("unplanned") or {}
         by_join_date = kind == "unplanned" and rule.get("rule") == "added_after_start"
@@ -555,6 +557,21 @@ class Engine:
         if lookback:
             return self._lookback(spec, raw)
         return self._snapshot(spec, raw, sprint)
+
+    def _count(self, spec: dict) -> dict:
+        """How many issues the scope holds, as Jira's own search counts them: sub-tasks and
+        statuses the room never counts included, so the figure matches the issue navigator
+        and can be used for cancelled or unassigned work. Jira does the counting, so there
+        is no limit on how many issues may match."""
+        if spec["boardId"]:
+            _, jql, sprint = self._board_scope(spec["boardId"], spec["jql"], "active", use_subquery=True)
+            n = self.client.board_count(spec["boardId"], jql)
+            where = "in the active sprint" if sprint else "on the board"
+            detail = f"{_plural(n, 'issue')} {where}" + (" match" if spec["jql"] else "")
+        else:
+            n = self.client.count(_without_order(resolve_jql(spec["jql"], self.pi_field, self.pis, self.today)))
+            detail = f"{n} issue matches" if n == 1 else f"{n} issues match"
+        return {"ok": True, "value": n, "unit": "items", "n": n, "detail": detail, "history": [], "fetchedAt": _now()}
 
     def _lookback(self, spec: dict, raw: list[dict]) -> dict:
         kind, window = spec["metric"], spec["windowDays"]

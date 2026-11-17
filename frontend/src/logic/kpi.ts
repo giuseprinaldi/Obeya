@@ -104,6 +104,7 @@ export const METRICS: Record<MetricKind, MetricInfo> = {
   blocked_now: { label: "Blocked items", explain: "Items blocked right now, by the rules under Blocked means in Jira settings.", name: "Blocked items", unit: "", dir: "down", window: false, stat: false, measure: false },
   blocked_days: { label: "Blocked days", explain: "Total days items spent blocked during the look-back window.", name: "Blocked days", unit: "days", dir: "down", window: true, stat: false, measure: false },
   unplanned: { label: "Unplanned work", explain: "Share of the scope that is unplanned, by the rule chosen below.", name: "Unplanned work", unit: "%", dir: "down", window: false, stat: false, measure: true },
+  count: { label: "Issues matching", explain: "How many issues the query or board holds right now, counted the way Jira's own search counts them: sub-tasks and statuses under Never counted are included.", name: "Issues", unit: "", dir: "down", window: false, stat: false, measure: false },
 };
 
 export const METRIC_KINDS = Object.keys(METRICS) as MetricKind[];

@@ -109,9 +109,9 @@ function forMetric(m) {
   if (/syntax error/i.test(m.jql)) return fail("Jira rejected the query: syntax error.");
   if (m.kind === "unplanned" && m.unplanned.rule === "added_after_start") return fail("The board's sprint report could not be read, so work added after the start is unknown.");
   if (m.kind === "cycle_time") return { ok: true, value: null, unit: "days", n: 0, detail: `No work was finished in the last ${m.windowDays} days`, history: [], fetchedAt };
-  const series = { lead_time: [12, 11, 9.5, 9, 8, 6.5], throughput: [3, 4, 4, 5, 6, 7], blocked_days: [0, 1, 1, 2, 3, 3], scope_done: [8, 20, 31, 44, 52, 61], wip: [4, 5, 7, 6, 5, 5], blocked_now: [0, 1, 1, 2, 2, 2], unplanned: [5, 8, 9, 12, 12, 13] }[m.kind];
-  const unit = { lead_time: "days", throughput: "/ week", blocked_days: "days", scope_done: "%", wip: m.measure === "points" ? "pts" : "items", blocked_now: "items", unplanned: "%" }[m.kind];
-  const detail = { lead_time: `${m.stat} of 23 items finished in the last ${m.windowDays} days`, throughput: `23 items finished in the last ${m.windowDays} days`, blocked_days: `3 items were blocked in the last ${m.windowDays} days`, scope_done: "37 of 61 points done", wip: "5 items in progress", blocked_now: "2 of 18 open items are blocked", unplanned: "4 of 31 items are unplanned" }[m.kind];
+  const series = { lead_time: [12, 11, 9.5, 9, 8, 6.5], throughput: [3, 4, 4, 5, 6, 7], blocked_days: [0, 1, 1, 2, 3, 3], scope_done: [8, 20, 31, 44, 52, 61], wip: [4, 5, 7, 6, 5, 5], blocked_now: [0, 1, 1, 2, 2, 2], unplanned: [5, 8, 9, 12, 12, 13], count: [41, 39, 36, 30, 27, 24] }[m.kind];
+  const unit = { lead_time: "days", throughput: "/ week", blocked_days: "days", scope_done: "%", wip: m.measure === "points" ? "pts" : "items", blocked_now: "items", unplanned: "%", count: "items" }[m.kind];
+  const detail = { lead_time: `${m.stat} of 23 items finished in the last ${m.windowDays} days`, throughput: `23 items finished in the last ${m.windowDays} days`, blocked_days: `3 items were blocked in the last ${m.windowDays} days`, scope_done: "37 of 61 points done", wip: "5 items in progress", blocked_now: "2 of 18 open items are blocked", unplanned: "4 of 31 items are unplanned", count: "24 issues match" }[m.kind];
   return { ok: true, value: series.at(-1), unit, n: 23, detail, history: series.map((value, i) => ({ d: day((i - series.length + 1) * 7), value })), fetchedAt };
 }
 
